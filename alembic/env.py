@@ -5,8 +5,8 @@ from alembic import context
 from backend.config import settings
 from backend.db.base import Base
 
-# Import all models here so Alembic can detect them for autogenerate
-# from backend.db.models import *  # noqa: F401, F403
+# Import all models so Alembic autogenerate can detect them
+import backend.db.models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.sync_database_url)

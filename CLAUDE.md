@@ -370,18 +370,131 @@ Both produce the same event log format consumed by the EventRunner.
 
 ---
 
-## Database Schema (simplified)
+## Database Schema
 
+### Global / Shared (compiled once, referenced by many sessions)
 ```
-users               id, email, password_hash, display_name, anthropic_api_key_enc
-sessions            id, owner_id, sport, season, mode, compression_factor, status, config_json
-session_memberships session_id, user_id, role, team_id
-teams               id, session_id, name, type (AGENT|HUMAN|EXTERNAL), config_json
-event_log           id, session_id, seq, event_type, payload_json, wall_time
-snapshots           id, session_id, seq, world_state_json, taken_at
-pending_decisions   id, session_id, team_id, decision_type, context_json, deadline, resolved_at
-agent_decisions     id, session_id, seq, team_id, decision_type, payload_json, reasoning_trace
-trade_locks         player_id, session_id, trade_id, locked_until
+season_scripts      id, sport, season, season_type, compiled_at, total_events, status
+                    UNIQUE(sport, season, season_type)
+
+season_events       id (bigint), script_id, seq, event_type, payload (JSONB),
+                    week_number, sim_offset_hours
+                    INDEX(script_id, seq), INDEX(script_id, week_number)
+                    sim_offset_hours = hours from season kickoff; wall_time per session
+                    computed as wall_start_time + (sim_offset_hours / compression_factor)
+```
+
+### Auth
+```
+users               id, email, password_hash (nullable), auth0_sub (nullable),
+                    display_name, anthropic_api_key_enc (Fernet blob)
+
+session_invites     id, session_id, token (unique), created_by, expires_at,
+                    used_at, used_by
+```
+
+### Sessions
+```
+sessions            id, owner_id, script_id (FK season_scripts), name, sport, season,
+                    status, mode, compression_factor, wall_start_time,
+                    current_seq (EventRunner cursor), scoring_config (JSONB)
+                    status: DRAFT_PENDING → DRAFT_IN_PROGRESS → DRAFT_COMPLETE
+                            → IN_PROGRESS → PAUSED → COMPLETED
+
+session_memberships id, session_id, user_id (nullable), role (OWNER|MEMBER|OBSERVER),
+                    team_id (nullable — observers have no team)
+                    UNIQUE(session_id, user_id)
+```
+
+### Teams & Rosters
+```
+teams               id, session_id, name, type (AGENT|HUMAN|EXTERNAL),
+                    faab_balance, config (JSONB)
+                    config shape: AGENT={archetype,reasoning_depth,system_prompt}
+                                  EXTERNAL={container_url,health_endpoint}
+                                  HUMAN={}
+
+roster_players      id, team_id, player_id (Sleeper string ID), slot (ACTIVE|BENCH|IR),
+                    acquired_week, acquired_via (DRAFT|WAIVER|TRADE)
+                    UNIQUE(team_id, player_id)
+                    Player metadata is never stored — always fetched from Sleeper/Redis
+```
+
+### Draft (schema present; logic wired in Phase 2)
+```
+drafts              id, session_id (unique), type (SNAKE|AUCTION), status,
+                    current_round, current_pick, turn_team_id, pick_deadline,
+                    auction_budget (nullable — separate from in-season FAAB)
+
+draft_picks         id, draft_id, team_id, player_id, round, pick_number,
+                    bid_amount (nullable, AUCTION only), picked_at
+```
+
+### Session Events & Decisions
+```
+processed_events    id, session_id, seq, event_type, payload (JSONB), processed_at
+                    Per-session audit log of meaningful milestones ONLY.
+                    STAT_UPDATE events flow through Redis Streams — not stored here.
+                    Stored types: AGENT_WINDOW_*, WEEK_END, WAIVER_RESOLVED,
+                    TRADE_RESOLVED, INJURY_UPDATE, DRAFT_PICK, SEASON_END
+
+pending_decisions   id, session_id, team_id, decision_type, context (JSONB),
+                    deadline, resolved_at, resolution (JSONB)
+                    Open action waiting on a human; auto-resolved on deadline
+
+agent_decisions     id, session_id, team_id, seq, decision_type, payload (JSONB),
+                    reasoning_trace (text), tokens_used, created_at
+                    Full audit of every decision by every team (agents + humans)
+```
+
+### League Engine
+```
+matchups            id, session_id, period_number, home_team_id, away_team_id,
+                    home_score, away_score, winner_team_id (nullable)
+                    Scores increment on each STAT_UPDATE; winner set at WEEK_END
+                    Live standings = standings JOIN current matchup row
+
+player_scores       id, session_id, team_id, period_number, player_id,
+                    points_total, stats_json (JSONB), updated_at
+                    Upserted on each STAT_UPDATE. stats_json holds raw accumulators
+                    e.g. {"rec": 7, "rec_yd": 89, "rec_td": 1}
+                    UNIQUE(session_id, team_id, period_number, player_id)
+
+standings           id, session_id, team_id, wins, losses, ties,
+                    points_for, points_against, updated_at
+                    Season record only. Updated once per WEEK_END.
+                    UNIQUE(session_id, team_id)
+
+waiver_bids         id, session_id, team_id, period_number, add_player_id,
+                    drop_player_id (nullable), bid_amount, priority,
+                    status (PENDING|WON|LOST|CANCELLED), processed_at
+                    priority = preference order (1 = top choice)
+                    Resolved atomically at WAIVER_RESOLVED: highest bid wins
+
+trade_proposals     id, session_id, proposing_team_id, receiving_team_id,
+                    offered_player_ids (JSONB array), requested_player_ids (JSONB array),
+                    status (PENDING|ACCEPTED|REJECTED|EXPIRED|CANCELLED),
+                    proposed_at, resolved_at, note
+
+trade_locks         player_id (PK), session_id (PK), trade_proposal_id, locked_until
+                    Composite PK — a player can only be locked once per session
+                    Released immediately on trade resolution
+```
+
+### Snapshots
+```
+snapshots           id, session_id, seq, period_number, world_state (JSONB), taken_at
+                    Captured at each week boundary.
+                    world_state: all rosters, FAAB balances, standings, matchup scores
+                    Enables seek/resume without replaying from seq=0
+```
+
+### What Lives Outside the DB
+```
+Player universe     Sleeper API + Redis cache (name, position, NFL team, etc.)
+Projections         Sleeper API + Redis cache
+STAT_UPDATE events  Redis Streams only — play-by-play feel, not persisted to DB
+Event distribution  Redis Streams  session:{id}:events
 ```
 
 ---
