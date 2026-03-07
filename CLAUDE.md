@@ -89,8 +89,9 @@ clanker-gauntlet/
 │   │   ├── cache.py          # disk cache layer (player universe, projections)
 │   │   └── models.py         # Pydantic models: Player, Projection, NewsItem, GameEvent
 │   └── db/
-│       ├── models.py         # SQLAlchemy ORM models
-│       └── migrations/       # Alembic migration scripts
+│       ├── base.py           # DeclarativeBase
+│       ├── models.py         # all 20 SQLAlchemy ORM models + enums
+│       └── session.py        # async engine + AsyncSessionLocal + get_db
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/
@@ -110,7 +111,14 @@ clanker-gauntlet/
 │   │   └── models.py         # WeekContext, LineupDecision, WaiverBid, TradeDecision
 │   └── spec/
 │       └── openapi.yaml      # formal HTTP protocol spec agents must implement
+├── alembic/
+│   ├── env.py                # Alembic migration environment
+│   ├── script.py.mako        # migration template
+│   └── versions/             # generated migration files
+├── .github/
+│   └── dependabot.yml        # weekly dep updates (pip, docker, actions)
 └── tests/
+    └── conftest.py           # async test client + DB fixtures
 ```
 
 ---
@@ -166,7 +174,9 @@ The same compiled event log is used for all three modes. Only the mechanism that
 
 ## Event Log
 
-The season script is a chronologically ordered JSONL file compiled once from data APIs. The EventRunner holds a cursor into this log.
+The season script is compiled once from data APIs and stored in the `season_events` DB table (shared across all sessions backtesting the same season). The EventRunner holds a cursor (`current_seq`) into this table, persisted in the `sessions` row so sessions survive restarts.
+
+`STAT_UPDATE` events flow through Redis Streams only — they are NOT stored in `season_events`. All other event types are stored and drive the simulation.
 
 ### Event Types
 
@@ -199,10 +209,11 @@ Snapshots are taken at week boundaries to avoid replaying from week 1.
 
 ## Team Architecture
 
-All team types implement the same interface. The EventRunner only calls these three methods:
+All team types implement the same interface. The EventRunner only calls these methods:
 
 ```python
 class Team(Protocol):
+    async def make_draft_pick(self, ctx: DraftContext) -> DraftPick: ...      # Phase 2
     async def decide_lineup(self, ctx: WeekContext) -> LineupDecision: ...
     async def bid_waivers(self, ctx: WaiverContext) -> list[WaiverBid]: ...
     async def evaluate_trade(self, ctx: TradeContext) -> TradeDecision: ...
@@ -363,10 +374,10 @@ Users can also define custom agents via a system prompt in the UI, or upload the
 
 | Mode | Component | Behavior |
 |------|-----------|----------|
-| Backtesting | `ScriptCompiler` | One-time: pulls all historical data for a completed season → `season_YYYY.events.jsonl` |
-| Live season | `LiveIngester` | Continuous: polls data APIs for new events as the real season progresses → appends to event log |
+| Backtesting | `ScriptCompiler` | One-time: pulls all historical data for a completed season → writes to `season_scripts` + `season_events` DB tables |
+| Live season | `LiveIngester` | Continuous: polls data APIs for new events as the real season progresses → appends rows to `season_events` |
 
-Both produce the same event log format consumed by the EventRunner.
+Both produce rows in the same `season_events` table consumed by the EventRunner.
 
 ---
 
@@ -501,11 +512,11 @@ Event distribution  Redis Streams  session:{id}:events
 
 ## State Persistence & Replay
 
-- The event log is append-only and is the source of truth
-- WorldState at any point = nearest snapshot before that point + replay of events since
+- `season_events` is the source of truth (shared, immutable once compiled)
+- WorldState at any point = nearest snapshot before that point + replay of `processed_events` since
 - Snapshots taken automatically at week boundaries
-- Cursor position (current_seq) persisted in DB — sessions survive server restarts
-- Agent reasoning traces stored per decision for full auditability in the UI
+- Cursor position (`current_seq`) persisted in `sessions` row — sessions survive server restarts
+- Agent reasoning traces stored in `agent_decisions` per decision for full auditability in the UI
 
 ---
 
@@ -543,12 +554,15 @@ Same containers, different orchestration:
 Backend and frontend built together for easier debugging and iteration.
 
 **Backend**
-- [ ] FastAPI skeleton with PostgreSQL + Alembic + Redis
-- [ ] Auth: Auth0 integration + JWT fallback (toggled by `AUTH_PROVIDER` env var)
+- [x] FastAPI skeleton with PostgreSQL + Alembic + Redis
+- [x] SQLAlchemy async models (20 tables) + initial migration applied
+- [x] pydantic-settings Config with Auth0/JWT toggle via `AUTH_PROVIDER`
+- [x] psycopg2-binary for Alembic sync driver; asyncpg for app async driver
+- [ ] Auth: Auth0 integration + JWT fallback (via authlib)
 - [ ] User accounts with encrypted Anthropic API key storage
 - [ ] Sleeper API client + Redis cache (player universe, projections)
 - [ ] Pydantic models: Player, Projection, NewsItem, GameEvent
-- [ ] ScriptCompiler: pull 2025 NFL data → `season_2025.events.jsonl`
+- [ ] ScriptCompiler: pull 2025 NFL data → `season_scripts` + `season_events` DB
 - [ ] Scoring engine (0.5 PPR, standard NFL roster)
 - [ ] EventRunner — INSTANT mode (tight async loop, cursor-based)
 - [ ] `Team` protocol + `ToolUseAgent` (Claude tool-use loop)
@@ -597,8 +611,8 @@ Backend and frontend built together for easier debugging and iteration.
 ## Environment Variables
 
 ```
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/clanker_gauntlet
+# Database (async driver for app; Alembic derives sync URL automatically)
+DATABASE_URL=postgresql+asyncpg://clanker:clanker@localhost:5432/clanker_gauntlet
 
 # Redis
 REDIS_URL=redis://localhost:6379
@@ -621,11 +635,12 @@ ANTHROPIC_API_KEY=...           # platform-level key (fallback if user has no ke
 
 ```bash
 # Install backend deps
-uv add fastapi sqlalchemy alembic pydantic anthropic httpx apscheduler \
-       redis aioredis authlib python-jose passlib rich pytest pytest-asyncio
+uv add fastapi sqlalchemy[asyncio] alembic asyncpg psycopg2-binary pydantic \
+       pydantic-settings anthropic httpx apscheduler redis authlib \
+       passlib[bcrypt] python-multipart cryptography rich
 
-# Start local dev stack (FastAPI + PostgreSQL + Redis)
-docker-compose up
+# Start local dev stack (PostgreSQL + Redis via Docker, backend runs directly)
+docker compose up -d
 
 # Run DB migrations
 alembic upgrade head
