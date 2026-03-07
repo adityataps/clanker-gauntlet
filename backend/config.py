@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     auth0_client_id: str = ""
     auth0_client_secret: str = ""
 
-    # JWT
+    # JWT (via authlib)
     jwt_secret_key: str = "changeme"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 10080  # 7 days
