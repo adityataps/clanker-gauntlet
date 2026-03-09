@@ -715,8 +715,8 @@ The auth endpoints (register → login → `/auth/me`) have been implemented but
 **ScriptCompiler DB write volume**
 ~17 weeks × ~500 events = ~8,500 rows inserted into `season_events`. Use `session.add_all(batch)` in chunks of 500 rather than row-by-row to avoid session bloat and slow migrations.
 
-**`data_cache/` not auto-created**
-The Sleeper player universe disk cache (`data_cache/nfl_players.json`) is gitignored and only created on first run. New contributors on a clean clone will need to run the app once (or the ScriptCompiler) before the cache exists. Document in README setup steps.
+**`data_cache/` not auto-created** _(documented in README)_
+The Sleeper player universe disk cache (`data_cache/nfl_players.json`) is gitignored and only created on first run. New contributors on a clean clone will need to run the app once (or the ScriptCompiler) before the cache exists. README setup steps note this.
 
 **Frontend is absent**
 Architecture intent was backend + frontend together for easier debugging. Once the EventRunner is working, the absence of a WebSocket consumer will make end-to-end verification harder. Frontend scaffold should go up before or during EventRunner development.

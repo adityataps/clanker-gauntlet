@@ -76,7 +76,7 @@ async def get_players(force_refresh: bool = False) -> dict[str, Player]:
             logger.debug("Player universe loaded from disk cache")
             raw = json.loads(_PLAYERS_CACHE_FILE.read_text())
             await cache.set(_REDIS_KEY_PLAYERS, raw, TTL_PLAYERS)
-            return {pid: Player(player_id=pid, **data) for pid, data in raw.items()}
+            return {pid: Player(**{**data, "player_id": pid}) for pid, data in raw.items()}
 
     # 3. Fetch from Sleeper
     logger.info("Fetching player universe from Sleeper API...")

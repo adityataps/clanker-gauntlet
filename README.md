@@ -90,6 +90,8 @@ docker compose up -d
 uv run alembic upgrade head
 
 # Start the backend
+# Note: the Sleeper player universe cache (data_cache/nfl_players.json) is
+# created automatically on first run. It is gitignored — this is expected.
 uv run uvicorn backend.main:app --reload
 
 # In another terminal, start the frontend (once scaffolded)
