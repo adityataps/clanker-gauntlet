@@ -1,11 +1,10 @@
-import enum
 import uuid
 from datetime import datetime
-from typing import Optional
+from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
-    Enum as SAEnum,
+    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -15,37 +14,38 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import (
+    Enum as SAEnum,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
-from sqlalchemy import DateTime
 
 from backend.db.base import Base
-
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
-class Sport(str, enum.Enum):
+class Sport(StrEnum):
     NFL = "nfl"
     NBA = "nba"
     MLB = "mlb"
 
 
-class SeasonType(str, enum.Enum):
+class SeasonType(StrEnum):
     PRESEASON = "preseason"
     REGULAR = "regular"
     PLAYOFF = "playoff"
 
 
-class ScriptStatus(str, enum.Enum):
+class ScriptStatus(StrEnum):
     PENDING = "pending"
     COMPILED = "compiled"
     FAILED = "failed"
 
 
-class SessionStatus(str, enum.Enum):
+class SessionStatus(StrEnum):
     DRAFT_PENDING = "draft_pending"
     DRAFT_IN_PROGRESS = "draft_in_progress"
     DRAFT_COMPLETE = "draft_complete"
@@ -54,62 +54,62 @@ class SessionStatus(str, enum.Enum):
     COMPLETED = "completed"
 
 
-class SessionMode(str, enum.Enum):
+class SessionMode(StrEnum):
     INSTANT = "instant"
     COMPRESSED = "compressed"
     REALTIME = "realtime"
 
 
-class MembershipRole(str, enum.Enum):
+class MembershipRole(StrEnum):
     OWNER = "owner"
     MEMBER = "member"
     OBSERVER = "observer"
 
 
-class TeamType(str, enum.Enum):
+class TeamType(StrEnum):
     AGENT = "agent"
     HUMAN = "human"
     EXTERNAL = "external"
 
 
-class RosterSlot(str, enum.Enum):
+class RosterSlot(StrEnum):
     ACTIVE = "active"
     BENCH = "bench"
     IR = "ir"
 
 
-class AcquiredVia(str, enum.Enum):
+class AcquiredVia(StrEnum):
     DRAFT = "draft"
     WAIVER = "waiver"
     TRADE = "trade"
 
 
-class DraftType(str, enum.Enum):
+class DraftType(StrEnum):
     SNAKE = "snake"
     AUCTION = "auction"
 
 
-class DraftStatus(str, enum.Enum):
+class DraftStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
 
 
-class DecisionType(str, enum.Enum):
+class DecisionType(StrEnum):
     LINEUP = "lineup"
     WAIVER = "waiver"
     TRADE_RESPONSE = "trade_response"
     DRAFT_PICK = "draft_pick"
 
 
-class WaiverBidStatus(str, enum.Enum):
+class WaiverBidStatus(StrEnum):
     PENDING = "pending"
     WON = "won"
     LOST = "lost"
     CANCELLED = "cancelled"
 
 
-class TradeStatus(str, enum.Enum):
+class TradeStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -132,7 +132,7 @@ class SeasonScript(Base):
     sport: Mapped[str] = mapped_column(SAEnum(Sport, native_enum=False), nullable=False)
     season: Mapped[int] = mapped_column(Integer, nullable=False)
     season_type: Mapped[str] = mapped_column(SAEnum(SeasonType, native_enum=False), nullable=False, default=SeasonType.REGULAR)
-    compiled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    compiled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_events: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(SAEnum(ScriptStatus, native_enum=False), nullable=False, default=ScriptStatus.PENDING)
 
@@ -179,10 +179,10 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # JWT auth only
-    auth0_sub: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)  # Auth0 only
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)  # JWT auth only
+    auth0_sub: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # Auth0 only
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    anthropic_api_key_enc: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    anthropic_api_key_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -196,8 +196,8 @@ class SessionInvite(Base):
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    used_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +219,8 @@ class Session(Base):
     season: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(SAEnum(SessionStatus, native_enum=False), nullable=False, default=SessionStatus.DRAFT_PENDING)
     mode: Mapped[str] = mapped_column(SAEnum(SessionMode, native_enum=False), nullable=False)
-    compression_factor: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # COMPRESSED mode only
-    wall_start_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    compression_factor: Mapped[int | None] = mapped_column(Integer, nullable=True)  # COMPRESSED mode only
+    wall_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_seq: Mapped[int] = mapped_column(Integer, default=0)
     scoring_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -238,9 +238,9 @@ class SessionMembership(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # null for system agents
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # null for system agents
     role: Mapped[str] = mapped_column(SAEnum(MembershipRole, native_enum=False), nullable=False)
-    team_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)  # null for observers
+    team_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)  # null for observers
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped["Session"] = relationship(back_populates="memberships")
@@ -312,9 +312,9 @@ class Draft(Base):
     status: Mapped[str] = mapped_column(SAEnum(DraftStatus, native_enum=False), nullable=False, default=DraftStatus.PENDING)
     current_round: Mapped[int] = mapped_column(Integer, default=1)
     current_pick: Mapped[int] = mapped_column(Integer, default=1)
-    turn_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
-    pick_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    auction_budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # AUCTION only, separate from FAAB
+    turn_team_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
+    pick_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    auction_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)  # AUCTION only, separate from FAAB
 
     picks: Mapped[list["DraftPick"]] = relationship(back_populates="draft", cascade="all, delete-orphan")
 
@@ -329,7 +329,7 @@ class DraftPick(Base):
     player_id: Mapped[str] = mapped_column(String(50), nullable=False)
     round: Mapped[int] = mapped_column(Integer, nullable=False)
     pick_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    bid_amount: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # AUCTION only
+    bid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)  # AUCTION only
     picked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     draft: Mapped["Draft"] = relationship(back_populates="picks")
@@ -377,8 +377,8 @@ class PendingDecision(Base):
     decision_type: Mapped[str] = mapped_column(SAEnum(DecisionType, native_enum=False), nullable=False)
     context: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    resolution: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("ix_pending_decisions_session_team", "session_id", "team_id"),
@@ -395,7 +395,7 @@ class AgentDecision(Base):
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     decision_type: Mapped[str] = mapped_column(SAEnum(DecisionType, native_enum=False), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    reasoning_trace: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reasoning_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -423,7 +423,7 @@ class Matchup(Base):
     away_team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
     home_score: Mapped[float] = mapped_column(Float, default=0.0)
     away_score: Mapped[float] = mapped_column(Float, default=0.0)
-    winner_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
+    winner_team_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("session_id", "period_number", "home_team_id", "away_team_id", name="uq_matchup_period_teams"),
@@ -489,11 +489,11 @@ class WaiverBid(Base):
     team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
     period_number: Mapped[int] = mapped_column(Integer, nullable=False)
     add_player_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    drop_player_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    drop_player_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     bid_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(SAEnum(WaiverBidStatus, native_enum=False), nullable=False, default=WaiverBidStatus.PENDING)
-    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_waiver_bids_session_team_period", "session_id", "team_id", "period_number"),
@@ -515,8 +515,8 @@ class TradeProposal(Base):
     requested_player_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(SAEnum(TradeStatus, native_enum=False), nullable=False, default=TradeStatus.PENDING)
     proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     locks: Mapped[list["TradeLock"]] = relationship(back_populates="trade_proposal", cascade="all, delete-orphan")
 

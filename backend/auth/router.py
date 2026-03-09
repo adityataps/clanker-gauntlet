@@ -14,7 +14,6 @@ Auth0 mode (AUTH_PROVIDER=auth0):
 Both modes share /auth/me and the User upsert logic.
 """
 
-import secrets
 import uuid
 from typing import Annotated
 

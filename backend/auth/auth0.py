@@ -7,7 +7,7 @@ Tokens are RS256-signed JWTs issued by Auth0.
 """
 
 import httpx
-from authlib.jose import jwt, JoseError, JsonWebKey
+from authlib.jose import JsonWebKey, jwt
 
 from backend.config import settings
 

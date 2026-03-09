@@ -63,7 +63,7 @@ async def get_current_user(
             from backend.auth.auth0 import decode_auth0_token
             claims = await decode_auth0_token(token)
     except (JoseError, ValueError):
-        raise credentials_exception
+        raise credentials_exception from None
 
     sub = claims.get("sub")
     if not sub:

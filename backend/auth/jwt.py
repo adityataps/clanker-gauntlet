@@ -3,10 +3,10 @@ JWT issue and verification using authlib.
 Used when AUTH_PROVIDER=jwt (local dev / self-hosted deployments).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from authlib.jose import jwt, JoseError
+from authlib.jose import jwt
 
 from backend.config import settings
 
@@ -15,7 +15,7 @@ _HEADER = {"alg": settings.jwt_algorithm}
 
 def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
     """Issue a signed JWT. `subject` is the user's UUID string."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "iat": now,

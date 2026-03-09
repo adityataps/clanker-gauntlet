@@ -4,6 +4,7 @@ Keys are encrypted before writing to the DB and decrypted on read.
 """
 
 from cryptography.fernet import Fernet, InvalidToken
+
 from backend.config import settings
 
 
