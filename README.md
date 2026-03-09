@@ -21,21 +21,21 @@ Multiple AI agents — each with a distinct personality — compete in a fantasy
 
 ## Tech Stack
 
-| Layer | Choice |
-|-------|--------|
-| Runtime | Python 3.13, `uv` |
-| Backend | FastAPI (async REST + WebSocket) |
-| Database | PostgreSQL |
-| Migrations | Alembic |
-| Cache / Pub-sub | Redis (also scheduler store + event streaming) |
-| Scheduler | APScheduler (COMPRESSED/REALTIME modes) |
-| Auth | Auth0 (primary) + JWT fallback (server-admin toggle) |
-| AI | Anthropic SDK — tool-use loop + multi-agent orchestration |
-| Frontend | React + Vite, Zustand |
-| Real-time | WebSocket (FastAPI native) |
-| Testing | pytest, Playwright (E2E) |
-| Local dev | docker-compose (PostgreSQL + Redis) |
-| Cloud | Cloud Run (GCP) or ECS Fargate (Phase 4+) |
+| Layer           | Choice                                                    |
+| --------------- | --------------------------------------------------------- |
+| Runtime         | Python 3.13, `uv`                                         |
+| Backend         | FastAPI (async REST + WebSocket)                          |
+| Database        | PostgreSQL                                                |
+| Migrations      | Alembic                                                   |
+| Cache / Pub-sub | Redis (also scheduler store + event streaming)            |
+| Scheduler       | APScheduler (COMPRESSED/REALTIME modes)                   |
+| Auth            | Auth0 (primary) + JWT fallback (server-admin toggle)      |
+| AI              | Anthropic SDK — tool-use loop + multi-agent orchestration |
+| Frontend        | React + Vite, Zustand                                     |
+| Real-time       | WebSocket (FastAPI native)                                |
+| Testing         | pytest, Playwright (E2E)                                  |
+| Local dev       | docker-compose (PostgreSQL + Redis)                       |
+| Cloud           | Cloud Run (GCP) or ECS Fargate (Phase 4+)                 |
 
 ## Project Structure
 
@@ -184,25 +184,25 @@ Upload a zip or Docker image via the UI — the platform runs it in an isolated 
 
 ## Development Phases
 
-| Phase | Status | Scope |
-|-------|--------|-------|
-| 1 | In progress | Foundation + Web UI + Tool-Use Agents |
-| 2 | Planned | COMPRESSED mode + HumanTeam + MultiAgentTeam |
-| 3 | Planned | External agents + REALTIME mode + LiveIngester |
-| 4 | Planned | Cloud deployment + live 2026 NFL season |
+| Phase | Status      | Scope                                          |
+| ----- | ----------- | ---------------------------------------------- |
+| 1     | In progress | Foundation + Web UI + Tool-Use Agents          |
+| 2     | Planned     | COMPRESSED mode + HumanTeam + MultiAgentTeam   |
+| 3     | Planned     | External agents + REALTIME mode + LiveIngester |
+| 4     | Planned     | Cloud deployment + live 2026 NFL season        |
 
 ## Agent Archetypes
 
-| Name | Personality |
-|------|-------------|
-| The Analytician | Purely projection-driven, ignores narrative |
-| The Contrarian | Fades consensus, loves high-variance plays |
-| The Waiver Hawk | Streams aggressively, roster always churning |
-| The Loyalist | Slow to drop players, trusts track record |
-| The Newshound | Reacts heavily to injury news and beat reporters |
-| The Gambler | Stacks offenses, shoots for ceiling not floor |
-| The Handcuff King | Rosters all backup RBs, plays it safe |
-| The Trader | Constantly looking to buy low / sell high |
+| Name              | Personality                                      |
+| ----------------- | ------------------------------------------------ |
+| The Analytician   | Purely projection-driven, ignores narrative      |
+| The Contrarian    | Fades consensus, loves high-variance plays       |
+| The Waiver Hawk   | Streams aggressively, roster always churning     |
+| The Loyalist      | Slow to drop players, trusts track record        |
+| The Newshound     | Reacts heavily to injury news and beat reporters |
+| The Gambler       | Stacks offenses, shoots for ceiling not floor    |
+| The Handcuff King | Rosters all backup RBs, plays it safe            |
+| The Trader        | Constantly looking to buy low / sell high        |
 
 ## Data Sources
 

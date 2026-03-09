@@ -38,6 +38,7 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Pydantic schemas (request / response)
 # ---------------------------------------------------------------------------
 
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
@@ -67,6 +68,7 @@ class UserResponse(BaseModel):
 # JWT endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/register", response_model=TokenResponse)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if settings.auth_provider != "jwt":
@@ -86,6 +88,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     from backend.auth.jwt import create_access_token
+
     return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
@@ -97,10 +100,15 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if not user or not user.password_hash or not _pwd_context.verify(body.password, user.password_hash):
+    if (
+        not user
+        or not user.password_hash
+        or not _pwd_context.verify(body.password, user.password_hash)
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     from backend.auth.jwt import create_access_token
+
     return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
@@ -108,12 +116,14 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 # Auth0 endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/login")
 async def auth0_login(request: Request):
     if settings.auth_provider != "auth0":
         raise HTTPException(status_code=404, detail="Not found")
 
     from authlib.integrations.starlette_client import OAuth
+
     oauth = OAuth()
     oauth.register(
         name="auth0",
@@ -123,7 +133,9 @@ async def auth0_login(request: Request):
         client_kwargs={"scope": "openid email profile"},
     )
     redirect_uri = str(request.url_for("auth0_callback"))
-    return await oauth.auth0.authorize_redirect(request, redirect_uri, audience=settings.auth0_audience)
+    return await oauth.auth0.authorize_redirect(
+        request, redirect_uri, audience=settings.auth0_audience
+    )
 
 
 @router.get("/callback", name="auth0_callback")
@@ -132,6 +144,7 @@ async def auth0_callback(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Not found")
 
     from authlib.integrations.starlette_client import OAuth
+
     oauth = OAuth()
     oauth.register(
         name="auth0",
@@ -158,6 +171,7 @@ async def auth0_callback(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Issue our own JWT so the frontend uses the same token shape regardless of provider
     from backend.auth.jwt import create_access_token
+
     access_token = create_access_token(auth0_sub, extra_claims={"email": email})
 
     # Redirect to frontend with token in query param (frontend stores it)
@@ -168,6 +182,7 @@ async def auth0_callback(request: Request, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 # Shared
 # ---------------------------------------------------------------------------
+
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: Annotated[User, Depends(get_current_user)]):

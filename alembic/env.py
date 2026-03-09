@@ -1,12 +1,12 @@
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from alembic import context
 
-from backend.config import settings
-from backend.db.base import Base
+from sqlalchemy import engine_from_config, pool
 
 # Import all models so Alembic autogenerate can detect them
 import backend.db.models  # noqa: F401
+from alembic import context
+from backend.config import settings
+from backend.db.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.sync_database_url)

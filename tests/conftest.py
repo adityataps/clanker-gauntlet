@@ -1,10 +1,10 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.main import app
 from backend.db.base import Base
 from backend.db.session import get_db
+from backend.main import app
 
 TEST_DATABASE_URL = "postgresql+asyncpg://clanker:clanker@localhost:5432/clanker_gauntlet_test"
 

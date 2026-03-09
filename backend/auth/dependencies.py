@@ -32,8 +32,7 @@ async def _resolve_user_from_sub(sub: str, db: AsyncSession) -> User:
     """
     # JWT subs are UUIDs; Auth0 subs are strings like "auth0|abc123"
     stmt = (
-        select(User)
-        .where(User.auth0_sub == sub)
+        select(User).where(User.auth0_sub == sub)
         if "|" in sub
         else select(User).where(User.id == uuid.UUID(sub))
     )
@@ -58,9 +57,11 @@ async def get_current_user(
     try:
         if settings.auth_provider == "jwt":
             from backend.auth.jwt import decode_access_token
+
             claims = decode_access_token(token)
         else:
             from backend.auth.auth0 import decode_auth0_token
+
             claims = await decode_auth0_token(token)
     except (JoseError, ValueError):
         raise credentials_exception from None

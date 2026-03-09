@@ -1,0 +1,21 @@
+repos:
+  # Ruff — Python linter + formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.5
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Prettier — JS/TS/CSS/JSON/YAML/Markdown formatter
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        types_or: [javascript, jsx, ts, tsx, css, json, yaml, markdown]
+        exclude: |
+          (?x)^(
+            uv\.lock|
+            alembic/.*|
+            \.github/.*
+          )$
