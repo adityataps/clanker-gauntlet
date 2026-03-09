@@ -1,5 +1,4 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
 from typing import Literal
 
 
@@ -19,6 +18,7 @@ class Settings(BaseSettings):
     auth0_domain: str = ""
     auth0_client_id: str = ""
     auth0_client_secret: str = ""
+    auth0_audience: str = ""
 
     # JWT (via authlib)
     jwt_secret_key: str = "changeme"
