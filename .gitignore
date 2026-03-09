@@ -295,6 +295,9 @@ cython_debug/
 #.idea/
 
 ### Project-specific
+# Sleeper API disk cache (player universe)
+data_cache/
+
 # OS
 .DS_Store
 Thumbs.db
