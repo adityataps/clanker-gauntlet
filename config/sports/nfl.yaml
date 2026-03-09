@@ -1,0 +1,81 @@
+sport: nfl
+
+# ---------------------------------------------------------------------------
+# Scoring rules (default: 0.5 PPR)
+# Stat field names match Sleeper API response keys.
+# Override per session via sessions.scoring_config JSONB.
+# ---------------------------------------------------------------------------
+scoring:
+  # Passing
+  pass_yd: 0.04 # per yard
+  pass_td: 4.0
+  pass_int: -2.0
+  pass_2pt: 2.0
+  pass_sack: 0.0 # most leagues don't penalize QB for sacks
+
+  # Rushing
+  rush_yd: 0.1 # per yard
+  rush_td: 6.0
+  rush_2pt: 2.0
+
+  # Receiving (0 = standard, 0.5 = half-PPR, 1.0 = full PPR)
+  rec: 0.5
+  rec_yd: 0.1
+  rec_td: 6.0
+  rec_2pt: 2.0
+
+  # Miscellaneous
+  fum_lost: -2.0
+  ret_td: 6.0 # return touchdown (punt/kick)
+
+  # Kicker
+  xpm: 1.0 # extra point made
+  fgm_0_19: 3.0
+  fgm_20_29: 3.0
+  fgm_30_39: 3.0
+  fgm_40_49: 4.0
+  fgm_50_59: 5.0
+  fgm_60_plus: 6.0
+  fgmiss: -1.0 # any missed FG
+
+  # Defense / Special Teams — per-play stats
+  sack: 1.0
+  int: 2.0
+  fum_rec: 2.0
+  def_td: 6.0 # defensive/ST TD (Sleeper: "td" for DEF players)
+  safe: 2.0
+  blk_kick: 2.0
+
+  # Defense — points allowed (tiered, special-cased in engine)
+  # Each tier applies when pts_allow <= max
+  pts_allow_tiers:
+    - { max: 0, pts: 10 }
+    - { max: 6, pts: 7 }
+    - { max: 13, pts: 4 }
+    - { max: 20, pts: 1 }
+    - { max: 27, pts: 0 }
+    - { max: 34, pts: -1 }
+    - { max: 999, pts: -4 }
+
+# ---------------------------------------------------------------------------
+# Roster configuration
+# ---------------------------------------------------------------------------
+roster:
+  # Starting lineup slots (order determines display order in UI)
+  slots:
+    - QB
+    - RB
+    - RB
+    - WR
+    - WR
+    - TE
+    - FLEX # RB / WR / TE
+    - K
+    - DEF
+
+  # Positions eligible for FLEX slot
+  flex_positions: [RB, WR, TE]
+
+  bench_slots: 6
+  ir_slots: 1
+  max_teams: 12

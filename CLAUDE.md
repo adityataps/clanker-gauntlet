@@ -580,6 +580,7 @@ Backend and frontend built together for easier debugging and iteration.
 - [x] Ruff + Prettier + pre-commit hooks
 - [x] ScriptCompiler: pull 2025 NFL data → `season_scripts` + `season_events` DB
       (5,663 events: 5,526 SCORE_UPDATE + structural events across 17 weeks)
+- [x] Scoring engine (0.5 PPR) — validated 0.00 delta vs Sleeper for all skill positions
 - [ ] User API key management endpoints (PUT/DELETE /users/me/api-key)
 - [ ] Scoring engine (0.5 PPR, standard NFL roster)
 - [ ] EventRunner — INSTANT mode (tight async loop, cursor-based)
