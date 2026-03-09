@@ -578,6 +578,7 @@ Backend and frontend built together for easier debugging and iteration.
 - [x] Sleeper API client + two-tier cache (disk for player universe, Redis for projections/stats)
 - [x] Pydantic models: Player, PlayerStats, Projection, NewsItem, GameEvent, WaiverPlayer
 - [x] Ruff + Prettier + pre-commit hooks
+- [x] pytest suite: 91 tests (scoring engine, sport config, auth utils, auth endpoints, data models)
 - [x] ScriptCompiler: pull 2025 NFL data → `season_scripts` + `season_events` DB
       (5,663 events: 5,526 SCORE_UPDATE + structural events across 17 weeks)
 - [x] Scoring engine (0.5 PPR) — validated 0.00 delta vs Sleeper for all skill positions

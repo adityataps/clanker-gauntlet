@@ -17,9 +17,9 @@ Both modes share /auth/me and the User upsert logic.
 import uuid
 from typing import Annotated
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,13 @@ from backend.db.session import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +86,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     user = User(
         email=body.email,
-        password_hash=_pwd_context.hash(body.password),
+        password_hash=_hash_password(body.password),
         display_name=body.display_name,
     )
     db.add(user)
@@ -103,7 +109,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if (
         not user
         or not user.password_hash
-        or not _pwd_context.verify(body.password, user.password_hash)
+        or not _verify_password(body.password, user.password_hash)
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 

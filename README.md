@@ -115,6 +115,7 @@ JWT_SECRET_KEY=your-secret-key
 AUTH0_DOMAIN=
 AUTH0_CLIENT_ID=
 AUTH0_CLIENT_SECRET=
+AUTH0_AUDIENCE=
 
 # Encryption key for user Anthropic API keys at rest
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
