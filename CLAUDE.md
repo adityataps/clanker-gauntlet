@@ -10,6 +10,41 @@ Multiple AI agents — each with a distinct personality — compete in a fantasy
 
 ---
 
+## Terminology
+
+| Term             | Definition                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Season**       | A real-world sports season (e.g., the 2025 NFL regular season). Seasons are not stored — they are the source from which Scripts are compiled.                                                                                                                                                                                                                            |
+| **Script**       | A compiled, chronological list of events from a season. Stored in the DB (`season_scripts` + `season_events`). Shared across all sessions that backtest the same season. Two types: **post-season** (pre-compiled from a completed season, playable at any speed) and **live-season** (compiled in real-time as the current season unfolds, must run in Immersive mode). |
+| **Session**      | A user-created league playback of a script. Multiple users can belong to the same session; each user controls one team. Multiple sessions can run the same script concurrently and independently.                                                                                                                                                                        |
+| **Script Speed** | How fast a session plays back the script and how it handles agent decision windows.                                                                                                                                                                                                                                                                                      |
+| **Waiver Mode**  | How contested player pickups are resolved each week.                                                                                                                                                                                                                                                                                                                     |
+
+### Script Speeds
+
+| Speed         | Key         | Behavior                                                                                                                                                                                                                                                                                      |
+| ------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Blitz**     | `blitz`     | Plays through the script as fast as possible. Agents must act quickly — the runner does not wait for them. Context is pre-loaded via lookahead so agents start with full information. Best for backtesting and agent tuning.                                                                  |
+| **Managed**   | `managed`   | Plays at a compressed wall-clock ratio (e.g., a 17-week season in 17 days). The runner pauses at each agent window and waits for all teams to submit decisions before advancing. Agents get a fair chance. Best for leagues with friends who want a real season without a 17-week commitment. |
+| **Immersive** | `immersive` | Plays at 1:1 real-world time. Works with both post-season and live-season scripts. The runner does not wait for agents — deadlines are real timestamps. Context arrives via live feed as events happen. Best for the full fantasy season experience.                                          |
+
+### Waiver Modes
+
+| Mode         | How it works                                                                                                                                                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FAAB**     | Sealed-bid auction. Each team gets a seasonal budget ($100 default, never resets). Teams bid secretly; the highest dollar wins each contested player and the bid is permanently deducted. Ties broken by waiver priority. Unlimited claims per waiver period. |
+| **Priority** | Ordered claims. Teams are ranked in priority order; the highest-priority team gets each contested player. No budget involved — claims are free. One successful claim per team per waiver period (standard league rules).                                      |
+
+#### Priority Reset Modes (Priority waiver mode only)
+
+| Reset                | Behavior                                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rolling**          | The team that wins a claim drops to the bottom of the priority list. Non-winners retain their relative order. Most common in Yahoo/ESPN leagues.                                      |
+| **Season-long**      | Priority is assigned once at the start of the season (e.g., reverse of draft order) and never changes.                                                                                |
+| **Weekly standings** | Priority is re-ranked every week: worst record → highest priority. Tiebreaker: fewer points scored = higher priority. Gives struggling teams the best shot at improving their roster. |
+
+---
+
 ## Core Invariant
 
 > **The EventRunner is the single source of truth. Agents observe events and submit intentions. The runner resolves all intentions into state transitions atomically.**
@@ -27,7 +62,7 @@ Agents are stateless advisors. They never directly mutate shared state.
 | DB                                | PostgreSQL (docker-compose locally, managed cloud in production)                                  |
 | Migrations                        | Alembic                                                                                           |
 | Cache / Scheduler store / Pub-sub | Redis                                                                                             |
-| Scheduler                         | APScheduler (Redis job store for COMPRESSED/REALTIME modes)                                       |
+| Scheduler                         | APScheduler (Redis job store for MANAGED/IMMERSIVE modes)                                         |
 | Auth                              | Auth0 (primary); JWT username/password fallback (server-admin toggle via env var)                 |
 | Agent reasoning                   | Anthropic SDK — tool-use loop (Phase 1), multi-agent orchestration (Phase 3)                      |
 | Agent concurrency                 | In-process asyncio coroutines (Phase 1–2); Docker / Cloud Run containers (Phase 3+)               |
@@ -61,7 +96,7 @@ clanker-gauntlet/
 │   ├── core/
 │   │   ├── event_runner.py   # advances event log, owns WorldState, resolves intentions
 │   │   ├── session.py        # Session lifecycle (DRAFT → IN_PROGRESS → PAUSED → COMPLETED)
-│   │   ├── scheduler.py      # APScheduler integration for COMPRESSED/REALTIME modes
+│   │   ├── scheduler.py      # APScheduler integration for MANAGED/IMMERSIVE modes
 │   │   └── sport_config.py   # SportConfig loader from yaml
 │   ├── league/
 │   │   ├── engine.py         # scoring rules, matchup resolution
@@ -131,8 +166,8 @@ A session is a fully isolated league instance. Multiple sessions can run concurr
 Session
 ├── id, name, sport, season
 ├── status: DRAFT → IN_PROGRESS → PAUSED → COMPLETED
-├── mode: INSTANT | COMPRESSED | REALTIME
-├── compression_factor: N     (COMPRESSED only; e.g. 7 = 1 week per real day)
+├── script_speed: BLITZ | MANAGED | IMMERSIVE
+├── compression_factor: N     (MANAGED only; e.g. 7 = 1 week per real day)
 ├── season_start_wall_time    (when the session clock began)
 ├── teams: [Team]             (AgentTeam | HumanTeam | ExternalTeam, up to 12)
 ├── event_log_path            (path to compiled .events.jsonl)
@@ -160,15 +195,15 @@ User
 
 ---
 
-## Time Modes
+## Script Speeds
 
-The same compiled event log is used for all three modes. Only the mechanism that advances the cursor differs.
+The same compiled script is used for all three speeds. Only the mechanism that advances the cursor and handles agent decision windows differs.
 
-| Mode         | Mechanism                                                         | Use case                                                                          |
-| ------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `INSTANT`    | Tight async loop, advances as fast as the runner can process      | Backtesting, agent tuning, research                                               |
-| `COMPRESSED` | APScheduler maps events to wall-clock time via compression factor | League with friends without a 5-month commitment (e.g. 17-week season in 17 days) |
-| `REALTIME`   | 1:1 wall-clock mapping to historical event timestamps             | Immersive; feels like a real fantasy season                                       |
+| Speed       | Key         | Mechanism                                                                               | Use case                                                     |
+| ----------- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `BLITZ`     | `blitz`     | Tight async loop; does not wait for agents; pre-loads context via lookahead             | Backtesting, agent tuning, research                          |
+| `MANAGED`   | `managed`   | APScheduler at N:1 wall-clock ratio; blocks at each agent window until all teams submit | League with friends without a 17-week commitment             |
+| `IMMERSIVE` | `immersive` | 1:1 wall-clock mapping; does not wait for agents; context arrives via live feed         | Full fantasy season experience; supports live-season scripts |
 
 ---
 
@@ -578,17 +613,23 @@ Backend and frontend built together for easier debugging and iteration.
 - [x] Sleeper API client + two-tier cache (disk for player universe, Redis for projections/stats)
 - [x] Pydantic models: Player, PlayerStats, Projection, NewsItem, GameEvent, WaiverPlayer
 - [x] Ruff + Prettier + pre-commit hooks
-- [x] pytest suite: 91 tests (scoring engine, sport config, auth utils, auth endpoints, data models)
+- [x] pytest suite: 155 tests (scoring engine, sport config, auth utils, auth endpoints, data models,
+      world state, waiver resolution, event runner)
 - [x] ScriptCompiler: pull 2025 NFL data → `season_scripts` + `season_events` DB
       (5,663 events: 5,526 SCORE_UPDATE + structural events across 17 weeks)
 - [x] Scoring engine (0.5 PPR) — validated 0.00 delta vs Sleeper for all skill positions
+- [x] EventRunner — BLITZ mode (cursor-based, batch fetch, per-event cursor persist)
+      AGENT_WINDOW_OPEN launches asyncio Tasks; AGENT_WINDOW_CLOSE/WAIVER_RESOLVED collects them
+      Three script speeds (on Session): BLITZ (no wait, lookahead context), MANAGED (block
+      until all agents done), IMMERSIVE (no wait, live feed context). EventRunnerService is the
+      shared singleton that manages all session tasks; one asyncio.Task per session.
+- [x] `WorldState` — in-memory league state with snapshot serialization (to_snapshot/from_snapshot)
+- [x] `BaseTeam` protocol — abstract interface (decide_lineup, bid_waivers, evaluate_trade)
+- [x] `AgentTeam` + tool-use loop — context-scoped tools, archetype system prompt, decision logging
+      Tools: view*my_roster, get_projections, get_recent_news, view_waiver_wire, submit*\*
+- [x] 4 built-in archetype personas (Analytician, Contrarian, Waiver Hawk, Loyalist)
+- [x] FAAB waiver resolution (atomic, sealed-bid; `backend/league/waivers.py`)
 - [ ] User API key management endpoints (PUT/DELETE /users/me/api-key)
-- [ ] Scoring engine (0.5 PPR, standard NFL roster)
-- [ ] EventRunner — INSTANT mode (tight async loop, cursor-based)
-- [ ] `Team` protocol + `ToolUseAgent` (Claude tool-use loop)
-  - Tools: `get_projections`, `search_news`, `view_waiver_wire`, `propose_trade`
-- [ ] 4 built-in archetype personas
-- [ ] FAAB waiver resolution (atomic, collect-then-resolve)
 - [ ] Trade soft-locking
 - [ ] State persistence + week-boundary snapshots
 - [ ] Session + membership CRUD (invite links)
@@ -607,20 +648,20 @@ Backend and frontend built together for easier debugging and iteration.
 - [ ] Account settings: API key management
 - [ ] Playwright E2E skeleton
 
-### Phase 2 — COMPRESSED Mode + Human Players + Multi-Agent
+### Phase 2 — MANAGED Mode + Human Players + Multi-Agent
 
 - [ ] `HumanTeam` + PendingDecision pattern (human decisions via UI)
-- [ ] COMPRESSED time mode (APScheduler + Redis job store)
+- [ ] MANAGED script speed (APScheduler + Redis job store)
 - [ ] Auto-lineup fallback on missed deadlines
 - [ ] `MultiAgentTeam` — Researcher → Analyst → Strategist pipeline
 - [ ] Jitter for API call staggering at AGENT_WINDOW_OPEN
 
-### Phase 3 — External Agents + REALTIME Mode
+### Phase 3 — External Agents + IMMERSIVE Mode
 
 - [ ] Agent SDK (`clanker_agent_sdk` Python package, published separately)
 - [ ] `ExternalTeam` — HTTP container protocol
 - [ ] Agent upload (zip / Docker image) via UI
-- [ ] REALTIME time mode (1:1 wall-clock)
+- [ ] IMMERSIVE script speed (1:1 wall-clock)
 - [ ] LiveIngester — real-time data pipeline for live seasons
 
 ### Phase 4 — Cloud + Live Seasons
@@ -694,7 +735,7 @@ Phase 1 is ~30% complete. Infrastructure, auth, and the data layer are done. Cor
 
 **Recommended implementation order for remaining Phase 1 work:**
 
-1. ScriptCompiler → Scoring Engine → EventRunner (INSTANT mode, backend-only, no UI)
+1. ScriptCompiler → Scoring Engine → EventRunner (BLITZ mode, backend-only, no UI)
 2. ToolUseAgent + archetypes
 3. FAAB waiver resolution + trade soft-locking
 4. Session/membership CRUD + WebSocket

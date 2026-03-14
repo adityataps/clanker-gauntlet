@@ -125,6 +125,39 @@ ENCRYPTION_KEY=
 ANTHROPIC_API_KEY=
 ```
 
+## Terminology
+
+| Term             | Definition                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Season**       | A real-world sports season (e.g., the 2025 NFL regular season). Seasons are not stored — they are the source from which Scripts are compiled.                                                                                                                                                                                                                            |
+| **Script**       | A compiled, chronological list of events from a season. Stored in the DB (`season_scripts` + `season_events`). Shared across all sessions that backtest the same season. Two types: **post-season** (pre-compiled from a completed season, playable at any speed) and **live-season** (compiled in real-time as the current season unfolds, must run in Immersive mode). |
+| **Session**      | A user-created league playback of a script. Multiple users can belong to the same session; each user controls one team. Multiple sessions can run the same script concurrently and independently.                                                                                                                                                                        |
+| **Script Speed** | How fast a session plays back the script and how it handles agent decision windows.                                                                                                                                                                                                                                                                                      |
+| **Waiver Mode**  | How contested player pickups are resolved each week.                                                                                                                                                                                                                                                                                                                     |
+
+### Script Speeds
+
+| Speed         | Key         | Behavior                                                                                                                                                                                                                                                                                      |
+| ------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Blitz**     | `blitz`     | Plays through the script as fast as possible. Agents must act quickly — the runner does not wait for them. Context is pre-loaded via lookahead so agents start with full information. Best for backtesting and agent tuning.                                                                  |
+| **Managed**   | `managed`   | Plays at a compressed wall-clock ratio (e.g., a 17-week season in 17 days). The runner pauses at each agent window and waits for all teams to submit decisions before advancing. Agents get a fair chance. Best for leagues with friends who want a real season without a 17-week commitment. |
+| **Immersive** | `immersive` | Plays at 1:1 real-world time. Works with both post-season and live-season scripts. The runner does not wait for agents — deadlines are real timestamps. Context arrives via live feed as events happen. Best for the full fantasy season experience.                                          |
+
+### Waiver Modes
+
+| Mode         | How it works                                                                                                                                                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FAAB**     | Sealed-bid auction. Each team gets a seasonal budget ($100 default, never resets). Teams bid secretly; the highest dollar wins each contested player and the bid is permanently deducted. Ties broken by waiver priority. Unlimited claims per waiver period. |
+| **Priority** | Ordered claims. Teams are ranked in priority order; the highest-priority team gets each contested player. No budget involved — claims are free. One successful claim per team per waiver period (standard league rules).                                      |
+
+#### Priority Reset Modes (Priority waiver mode only)
+
+| Reset                | Behavior                                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rolling**          | The team that wins a claim drops to the bottom of the priority list. Non-winners retain their relative order. Most common in Yahoo/ESPN leagues.                                      |
+| **Season-long**      | Priority is assigned once at the start of the season (e.g., reverse of draft order) and never changes.                                                                                |
+| **Weekly standings** | Priority is re-ranked every week: worst record → highest priority. Tiebreaker: fewer points scored = higher priority. Gives struggling teams the best shot at improving their roster. |
+
 ## Architecture
 
 ### Core Invariant

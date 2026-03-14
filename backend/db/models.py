@@ -55,10 +55,21 @@ class SessionStatus(StrEnum):
     COMPLETED = "completed"
 
 
-class SessionMode(StrEnum):
-    INSTANT = "instant"
-    COMPRESSED = "compressed"
-    REALTIME = "realtime"
+class ScriptSpeed(StrEnum):
+    BLITZ = "blitz"  # fast loop, no waiting for agents; lookahead context pre-loaded
+    MANAGED = "managed"  # compressed wall-clock; blocks at each agent window until done
+    IMMERSIVE = "immersive"  # 1:1 wall-clock; no waiting for agents; live context feed
+
+
+class WaiverMode(StrEnum):
+    FAAB = "faab"  # sealed-bid auction; highest dollar wins; permanent deduction
+    PRIORITY = "priority"  # ordered claims; highest-priority team wins each contested player
+
+
+class PriorityReset(StrEnum):
+    ROLLING = "rolling"  # winner drops to bottom after each successful claim
+    SEASON_LONG = "season_long"  # set once at season start, never changes
+    WEEKLY_STANDINGS = "weekly_standings"  # re-ranked each week: worst record → highest priority
 
 
 class MembershipRole(StrEnum):
@@ -255,7 +266,15 @@ class Session(Base):
         nullable=False,
         default=SessionStatus.DRAFT_PENDING,
     )
-    mode: Mapped[str] = mapped_column(SAEnum(SessionMode, native_enum=False), nullable=False)
+    script_speed: Mapped[str] = mapped_column(
+        SAEnum(ScriptSpeed, native_enum=False), nullable=False
+    )
+    waiver_mode: Mapped[str] = mapped_column(
+        SAEnum(WaiverMode, native_enum=False), nullable=False, default=WaiverMode.FAAB
+    )
+    priority_reset: Mapped[str | None] = mapped_column(
+        SAEnum(PriorityReset, native_enum=False), nullable=True
+    )  # only relevant when waiver_mode == PRIORITY
     compression_factor: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )  # COMPRESSED mode only
