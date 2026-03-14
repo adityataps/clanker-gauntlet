@@ -613,7 +613,7 @@ Backend and frontend built together for easier debugging and iteration.
 - [x] Sleeper API client + two-tier cache (disk for player universe, Redis for projections/stats)
 - [x] Pydantic models: Player, PlayerStats, Projection, NewsItem, GameEvent, WaiverPlayer
 - [x] Ruff + Prettier + pre-commit hooks
-- [x] pytest suite: 155 tests (scoring engine, sport config, auth utils, auth endpoints, data models,
+- [x] pytest suite: 166 tests (scoring engine, sport config, auth utils, auth endpoints, data models,
       world state, waiver resolution, event runner)
 - [x] ScriptCompiler: pull 2025 NFL data → `season_scripts` + `season_events` DB
       (5,663 events: 5,526 SCORE_UPDATE + structural events across 17 weeks)
@@ -629,12 +629,13 @@ Backend and frontend built together for easier debugging and iteration.
       Tools: view*my_roster, get_projections, get_recent_news, view_waiver_wire, submit*\*
 - [x] 4 built-in archetype personas (Analytician, Contrarian, Waiver Hawk, Loyalist)
 - [x] FAAB waiver resolution (atomic, sealed-bid; `backend/league/waivers.py`)
+- [x] Priority waiver resolution (ordered claims, one per team per period, fallback to next choice)
+- [x] Priority reset modes: rolling, season-long, weekly-standings (`WorldState`)
 - [ ] User API key management endpoints (PUT/DELETE /users/me/api-key)
 - [ ] Trade soft-locking
 - [ ] State persistence + week-boundary snapshots
 - [ ] Session + membership CRUD (invite links)
 - [ ] WebSocket: broadcast session state updates to connected clients
-- [ ] pytest skeleton
 
 **Frontend**
 
@@ -731,16 +732,16 @@ cd frontend && npx playwright test
 
 ## Current Status (as of March 2026)
 
-Phase 1 is ~30% complete. Infrastructure, auth, and the data layer are done. Core simulation logic (ScriptCompiler, scoring engine, EventRunner, agents) is next.
+Phase 1 backend is ~75% complete. Infrastructure, auth, data layer, core simulation engine (ScriptCompiler, scoring, EventRunner, AgentTeam, waiver resolution) are all done. Remaining Phase 1 backend work is session/membership CRUD, trade soft-locking, WebSocket, and user API key endpoints. Frontend not yet started.
 
-**Recommended implementation order for remaining Phase 1 work:**
+**Remaining Phase 1 work:**
 
-1. ScriptCompiler → Scoring Engine → EventRunner (BLITZ mode, backend-only, no UI)
-2. ToolUseAgent + archetypes
-3. FAAB waiver resolution + trade soft-locking
-4. Session/membership CRUD + WebSocket
-5. React + Vite frontend scaffold (wire up alongside WebSocket)
-6. pytest suite + Playwright skeleton
+1. Trade soft-locking (`trade_locks` table, reject proposals that include locked players)
+2. State persistence — week-boundary snapshots written by EventRunner (schema done, writer not wired)
+3. Session + membership CRUD — create session, invite link generation, join via token
+4. WebSocket — broadcast `session:{id}:events` Redis Stream to connected UI clients
+5. User API key management endpoints (PUT/DELETE /users/me/api-key)
+6. React + Vite frontend scaffold — wire up alongside WebSocket
 
 ---
 
@@ -749,23 +750,20 @@ Phase 1 is ~30% complete. Infrastructure, auth, and the data layer are done. Cor
 **Auth not yet integration-tested**
 The auth endpoints (register → login → `/auth/me`) have been implemented but not exercised end-to-end against a running server with a real DB. Validate before the frontend lands — a broken auth flow will block everything else.
 
-**No tests yet**
-`tests/conftest.py` is scaffolded but there are zero test cases. The further we get without tests, the harder it becomes to add them safely. Target: write auth + scoring engine tests before or alongside the ScriptCompiler.
-
 **`SessionMiddleware` secret key**
 `SessionMiddleware` (required for the Auth0 callback flow) uses `JWT_SECRET_KEY`, which defaults to `"changeme"` in `.env.example`. Must be set to a real secret before any Auth0 flow. Not a blocker locally, but a sharp edge for new contributors or staging deployments.
-
-**ScriptCompiler DB write volume**
-~17 weeks × ~500 events = ~8,500 rows inserted into `season_events`. Use `session.add_all(batch)` in chunks of 500 rather than row-by-row to avoid session bloat and slow migrations.
 
 **`data_cache/` not auto-created** _(documented in README)_
 The Sleeper player universe disk cache (`data_cache/nfl_players.json`) is gitignored and only created on first run. New contributors on a clean clone will need to run the app once (or the ScriptCompiler) before the cache exists. README setup steps note this.
 
 **Frontend is absent**
-Architecture intent was backend + frontend together for easier debugging. Once the EventRunner is working, the absence of a WebSocket consumer will make end-to-end verification harder. Frontend scaffold should go up before or during EventRunner development.
+The EventRunner and AgentTeam are complete but have no WebSocket consumer to push state to. End-to-end verification (agent decisions visible in UI, live score ticking) is blocked until the frontend scaffold and WebSocket broadcaster land.
 
-**EventRunner is the highest-risk component**
-It's the architectural core — reads `season_events`, dispatches concurrently to agent teams, resolves intentions atomically, emits to Redis Streams, persists cursor and snapshots. Getting this right before adding UI layers is important. Plan for careful testing at each step (single event → single week → full season).
+**Snapshot writer not yet wired**
+`WorldState.to_snapshot()` / `from_snapshot()` are implemented and tested. The EventRunner calls `_take_snapshot()` at WEEK_END, but the DB write is a stub — the snapshots table is defined in the schema but the insert is not yet wired to the real DB session. Seek/resume will not work until this is completed.
+
+**Auth unit tests missing**
+The 166-test suite covers scoring, world state, waivers, and the event runner. Auth endpoints (register, login, `/auth/me`) have no tests. These should be added before the frontend ships to avoid shipping a broken auth flow.
 
 ---
 

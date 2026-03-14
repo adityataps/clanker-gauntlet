@@ -172,11 +172,11 @@ Agents are stateless advisors — they never directly mutate shared state.
 ScriptCompiler
   Sleeper API + RSS feeds → season_events DB table (shared, compiled once)
 
-EventRunner (per session)
+EventRunner (per session, via EventRunnerService — one asyncio.Task per session)
   Reads season_events sequentially, fires events at the right time
-  INSTANT:     tight async loop
-  COMPRESSED:  APScheduler at N:1 wall-clock ratio
-  REALTIME:    1:1 wall-clock mapping
+  BLITZ:     tight async loop; does not wait for agents; lookahead context pre-loaded
+  MANAGED:   APScheduler at N:1 wall-clock ratio; blocks until all agents submit
+  IMMERSIVE: 1:1 wall-clock mapping; does not wait; context arrives via live feed
 
 On each AGENT_WINDOW_OPEN:
   AgentTeam  → Claude tool-use loop → LineupDecision / WaiverBid / TradeDecision
@@ -187,6 +187,7 @@ STAT_UPDATE events → Redis Streams → WebSocket → UI (live scores)
                    → player_scores table upserted (aggregated per period)
 
 WEEK_END → standings updated, snapshots taken, waiver window opens
+WAIVER_RESOLVED → FAAB sealed-bid auction or priority claims resolved atomically
 ```
 
 ### Agent Reasoning Depth
@@ -197,9 +198,11 @@ standard  tool-use loop — agent queries projections, news, injuries
 deep      Researcher → Analyst → Strategist pipeline (claude-sonnet-4-6)
 ```
 
-### Waiver Concurrency
+### Waiver Resolution
 
-All agents submit FAAB bids independently. At `WAIVER_RESOLVED`, the runner processes all bids in one atomic DB transaction — highest bidder wins, no race conditions by design.
+**FAAB mode:** All agents submit sealed bids independently. At `WAIVER_RESOLVED`, the runner processes all bids in one atomic DB transaction — highest bidder wins, no race conditions by design.
+
+**Priority mode:** Teams are processed in waiver priority order. Each team gets at most one successful claim per waiver period; if their top target is already claimed, they fall back to their next preference. Priority order resets each week via configurable mode (rolling, season-long, or weekly standings).
 
 ### External Agents (Phase 3)
 
@@ -220,12 +223,12 @@ Upload a zip or Docker image via the UI — the platform runs it in an isolated 
 
 ## Development Phases
 
-| Phase | Status      | Scope                                          |
-| ----- | ----------- | ---------------------------------------------- |
-| 1     | In progress | Foundation + Web UI + Tool-Use Agents          |
-| 2     | Planned     | COMPRESSED mode + HumanTeam + MultiAgentTeam   |
-| 3     | Planned     | External agents + REALTIME mode + LiveIngester |
-| 4     | Planned     | Cloud deployment + live 2026 NFL season        |
+| Phase | Status      | Scope                                                                           |
+| ----- | ----------- | ------------------------------------------------------------------------------- |
+| 1     | In progress | Foundation + Web UI + Tool-Use Agents (backend ~75% done, frontend not started) |
+| 2     | Planned     | MANAGED mode + HumanTeam + MultiAgentTeam                                       |
+| 3     | Planned     | External agents + IMMERSIVE mode + LiveIngester                                 |
+| 4     | Planned     | Cloud deployment + live 2026 NFL season                                         |
 
 ## Agent Archetypes
 
