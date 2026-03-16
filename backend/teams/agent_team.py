@@ -1,9 +1,10 @@
 """
-AgentTeam — LLM-backed team using the Anthropic SDK tool-use loop.
+AgentTeam — LLM-backed team using the provider-agnostic tool-use loop.
 
 The agent receives a decision context (roster, projections, news) and uses
-Claude in a tool-use loop to reason about the best decision. Tools allow the
-agent to explore context data before calling a final submission tool.
+the configured LLM in a tool-use loop to reason about the best decision.
+Tools allow the agent to explore context data before calling a final submission
+tool.
 
 Tools are context-scoped: they operate on data already present in the context
 object, not on live API calls. This keeps the loop fast and deterministic for
@@ -22,9 +23,15 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-import anthropic
-
 from backend.agents.archetypes import ArchetypeConfig, get_archetype
+from backend.agents.llm_client import (
+    BaseLLMClient,
+    Message,
+    TextBlock,
+    ToolCallBlock,
+    ToolDefinition,
+    ToolResultBlock,
+)
 from backend.teams.context import (
     LineupDecision,
     RosterEntry,
@@ -43,25 +50,21 @@ T = TypeVar("T")
 # Max tool-use iterations per decision (safety cap to avoid infinite loops)
 MAX_TOOL_ITERATIONS = 12
 
-# Default model — Haiku for cost efficiency on routine decisions
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-
 # Fallback reasoning when an agent times out or fails to submit
 _TIMEOUT_REASONING = "Decision timed out or failed to parse — fallback applied."
 
 
 class AgentTeam(BaseTeam):
     """
-    LLM-backed team. Uses Claude in a tool-use loop to make decisions.
+    LLM-backed team. Uses any supported LLM provider in a tool-use loop.
 
     Args:
-        team_id:           UUID of the DB team record.
-        name:              Display name.
-        archetype:         Archetype key (e.g. "analytician") or ArchetypeConfig instance.
-        api_key:           Anthropic API key for this team.
-        model:             Claude model ID (default: Haiku).
-        session_id:        Parent session UUID (used in decision log callback).
-        on_decision_logged: Optional async callback(session_id, team_id, seq, decision_type,
+        team_id:            UUID of the DB team record.
+        name:               Display name.
+        archetype:          Archetype key (e.g. "analytician") or ArchetypeConfig instance.
+        llm_client:         Provider client (AnthropicClient, OpenAIClient, GeminiClient, …).
+        session_id:         Parent session UUID (used in decision log callback).
+        on_decision_logged: Optional async callback(session_id, team_id, decision_type,
                             payload, reasoning_trace, tokens_used) called after each decision.
     """
 
@@ -70,16 +73,14 @@ class AgentTeam(BaseTeam):
         team_id: uuid.UUID,
         name: str,
         archetype: str | ArchetypeConfig,
-        api_key: str,
+        llm_client: BaseLLMClient,
         *,
-        model: str = DEFAULT_MODEL,
         session_id: uuid.UUID | None = None,
         on_decision_logged: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__(team_id, name)
         self._archetype = get_archetype(archetype) if isinstance(archetype, str) else archetype
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
-        self._model = model
+        self._llm_client = llm_client
         self._session_id = session_id
         self._on_decision_logged = on_decision_logged
 
@@ -113,7 +114,7 @@ class AgentTeam(BaseTeam):
         return decision
 
     async def bid_waivers(self, ctx: WaiverContext) -> list[WaiverBid]:
-        """Run tool-use loop to submit FAAB waiver bids."""
+        """Run tool-use loop to submit waiver bids."""
 
         def parse_bids(args: dict) -> list[WaiverBid]:
             return [WaiverBid(**bid) for bid in args.get("bids", [])]
@@ -165,7 +166,7 @@ class AgentTeam(BaseTeam):
 
     async def _run_loop(
         self,
-        tools: list[dict],
+        tools: list[ToolDefinition],
         user_message: str,
         submit_tool_name: str,
         parse_submission: Callable[[dict], T],
@@ -173,35 +174,33 @@ class AgentTeam(BaseTeam):
         fallback: T,
     ) -> tuple[T, str, int]:
         """
-        Run the Claude tool-use loop until the agent calls submit_tool_name.
+        Run the LLM tool-use loop until the agent calls submit_tool_name.
 
         Returns (decision, reasoning_trace, total_tokens_used).
         """
-        messages: list[dict] = [{"role": "user", "content": user_message}]
+        messages: list[Message] = [Message(role="user", content=user_message)]
         trace_parts: list[str] = []
         total_tokens = 0
 
         for iteration in range(MAX_TOOL_ITERATIONS):
-            response = await self._client.messages.create(
-                model=self._model,
-                max_tokens=2048,
-                system=self._archetype.system_prompt,
-                tools=tools,
+            response = await self._llm_client.chat(
                 messages=messages,
+                tools=tools,
+                system=self._archetype.system_prompt,
             )
-            total_tokens += response.usage.input_tokens + response.usage.output_tokens
+            total_tokens += response.usage.total
 
             # Collect any text reasoning for the trace
             for block in response.content:
-                if block.type == "text" and block.text:
+                if isinstance(block, TextBlock) and block.text:
                     trace_parts.append(block.text)
 
-            tool_calls = [b for b in response.content if b.type == "tool_use"]
+            tool_calls = [b for b in response.content if isinstance(b, ToolCallBlock)]
             submit_call = next((t for t in tool_calls if t.name == submit_tool_name), None)
 
             if submit_call is not None:
                 try:
-                    result = parse_submission(submit_call.input)
+                    result = parse_submission(submit_call.arguments)
                     return result, "\n".join(trace_parts), total_tokens
                 except Exception as exc:
                     logger.warning(
@@ -223,17 +222,15 @@ class AgentTeam(BaseTeam):
                 return fallback, "\n".join(trace_parts), total_tokens
 
             # Build tool results for non-submit calls and continue loop
-            tool_results = []
+            result_blocks: list[ToolResultBlock] = []
             for tc in tool_calls:
                 if tc.name == submit_tool_name:
                     continue
-                content = tool_handler(tc.name, tc.input)
-                tool_results.append(
-                    {"type": "tool_result", "tool_use_id": tc.id, "content": content}
-                )
+                content = tool_handler(tc.name, tc.arguments)
+                result_blocks.append(ToolResultBlock(tool_call_id=tc.id, content=content))
 
-            messages.append({"role": "assistant", "content": response.content})
-            messages.append({"role": "user", "content": tool_results})
+            messages.append(Message(role="assistant", content=list(response.content)))
+            messages.append(Message(role="user", content=result_blocks))
 
         logger.warning("%s hit max tool iterations (%d)", self._archetype.name, MAX_TOOL_ITERATIONS)
         return fallback, "\n".join(trace_parts), total_tokens
@@ -264,24 +261,24 @@ class AgentTeam(BaseTeam):
 
 
 # ------------------------------------------------------------------
-# Tool definitions (returned as dicts for the Anthropic SDK)
+# Tool definitions
 # ------------------------------------------------------------------
 
 
-def _lineup_tools() -> list[dict]:
+def _lineup_tools() -> list[ToolDefinition]:
     return [
-        {
-            "name": "view_my_roster",
-            "description": "View your current roster with player IDs, slots, and acquisition info.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "name": "get_projections",
-            "description": (
+        ToolDefinition(
+            name="view_my_roster",
+            description="View your current roster with player IDs, slots, and acquisition info.",
+            parameters={"type": "object", "properties": {}, "required": []},
+        ),
+        ToolDefinition(
+            name="get_projections",
+            description=(
                 "Get fantasy point projections for players. "
                 "Leave player_ids empty to get projections for all your roster players."
             ),
-            "input_schema": {
+            parameters={
                 "type": "object",
                 "properties": {
                     "player_ids": {
@@ -292,11 +289,11 @@ def _lineup_tools() -> list[dict]:
                 },
                 "required": [],
             },
-        },
-        {
-            "name": "get_recent_news",
-            "description": "Get recent injury reports and player news.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="get_recent_news",
+            description="Get recent injury reports and player news.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "limit": {
@@ -306,11 +303,11 @@ def _lineup_tools() -> list[dict]:
                 },
                 "required": [],
             },
-        },
-        {
-            "name": "submit_lineup",
-            "description": "Submit your final starting lineup. Call this when you've made your decision.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="submit_lineup",
+            description="Submit your final starting lineup. Call this when you've made your decision.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "starters": {
@@ -325,21 +322,21 @@ def _lineup_tools() -> list[dict]:
                 },
                 "required": ["starters"],
             },
-        },
+        ),
     ]
 
 
-def _waiver_tools() -> list[dict]:
+def _waiver_tools() -> list[ToolDefinition]:
     return [
-        {
-            "name": "view_my_roster",
-            "description": "View your current roster.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "name": "view_waiver_wire",
-            "description": "View players available on the waiver wire.",
-            "input_schema": {
+        ToolDefinition(
+            name="view_my_roster",
+            description="View your current roster.",
+            parameters={"type": "object", "properties": {}, "required": []},
+        ),
+        ToolDefinition(
+            name="view_waiver_wire",
+            description="View players available on the waiver wire.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "position": {
@@ -349,29 +346,29 @@ def _waiver_tools() -> list[dict]:
                 },
                 "required": [],
             },
-        },
-        {
-            "name": "get_projections",
-            "description": "Get projections for specific players by ID.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="get_projections",
+            description="Get projections for specific players by ID.",
+            parameters={
                 "type": "object",
                 "properties": {"player_ids": {"type": "array", "items": {"type": "string"}}},
                 "required": ["player_ids"],
             },
-        },
-        {
-            "name": "get_recent_news",
-            "description": "Get recent player news and injury updates.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="get_recent_news",
+            description="Get recent player news and injury updates.",
+            parameters={
                 "type": "object",
                 "properties": {"limit": {"type": "integer"}},
                 "required": [],
             },
-        },
-        {
-            "name": "submit_waiver_bids",
-            "description": "Submit your FAAB waiver bids. Priority 1 = top choice.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="submit_waiver_bids",
+            description="Submit your waiver bids. Priority 1 = top choice.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "bids": {
@@ -390,30 +387,30 @@ def _waiver_tools() -> list[dict]:
                 },
                 "required": ["bids"],
             },
-        },
+        ),
     ]
 
 
-def _trade_tools() -> list[dict]:
+def _trade_tools() -> list[ToolDefinition]:
     return [
-        {
-            "name": "view_my_roster",
-            "description": "View your current roster.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "name": "get_projections",
-            "description": "Get projections for specific players by ID.",
-            "input_schema": {
+        ToolDefinition(
+            name="view_my_roster",
+            description="View your current roster.",
+            parameters={"type": "object", "properties": {}, "required": []},
+        ),
+        ToolDefinition(
+            name="get_projections",
+            description="Get projections for specific players by ID.",
+            parameters={
                 "type": "object",
                 "properties": {"player_ids": {"type": "array", "items": {"type": "string"}}},
                 "required": ["player_ids"],
             },
-        },
-        {
-            "name": "submit_trade_decision",
-            "description": "Accept or reject the trade proposal.",
-            "input_schema": {
+        ),
+        ToolDefinition(
+            name="submit_trade_decision",
+            description="Accept or reject the trade proposal.",
+            parameters={
                 "type": "object",
                 "properties": {
                     "accept": {"type": "boolean"},
@@ -421,7 +418,7 @@ def _trade_tools() -> list[dict]:
                 },
                 "required": ["accept"],
             },
-        },
+        ),
     ]
 
 

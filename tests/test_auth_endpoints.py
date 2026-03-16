@@ -117,7 +117,7 @@ class TestMe:
         data = resp.json()
         assert data["email"] == email
         assert data["display_name"] == "Test User"
-        assert data["has_anthropic_key"] is False
+        assert data["has_keys"] == {"anthropic": False, "openai": False, "gemini": False}
 
     async def test_me_no_token(self, http_client):
         resp = await http_client.get("/auth/me")

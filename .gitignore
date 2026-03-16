@@ -311,3 +311,5 @@ Thumbs.db
 # Claude Code project files
 .claude/
 
+# Local
+local/

@@ -22,11 +22,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.auth.crypto import encrypt_api_key
 from backend.auth.dependencies import get_current_user
 from backend.config import settings
-from backend.db.models import User
+from backend.db.models import LLMProvider, User, UserApiKey
 from backend.db.session import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -65,9 +67,18 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
     display_name: str
-    has_anthropic_key: bool
+    has_keys: dict[str, bool]  # {"anthropic": True, "openai": False, "gemini": False}
 
     model_config = {"from_attributes": True}
+
+
+class ApiKeyRequest(BaseModel):
+    provider: LLMProvider
+    key: str
+
+
+class ApiKeyDeleteRequest(BaseModel):
+    provider: LLMProvider
 
 
 # ---------------------------------------------------------------------------
@@ -191,10 +202,61 @@ async def auth0_callback(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: Annotated[User, Depends(get_current_user)]):
+async def me(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(UserApiKey.provider).where(UserApiKey.user_id == current_user.id)
+    )
+    providers_with_keys = {row[0] for row in result.all()}
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         display_name=current_user.display_name,
-        has_anthropic_key=current_user.anthropic_api_key_enc is not None,
+        has_keys={p.value: p.value in providers_with_keys for p in LLMProvider},
     )
+
+
+@router.put("/me/api-key", status_code=status.HTTP_204_NO_CONTENT)
+async def upsert_api_key(
+    body: ApiKeyRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Store or replace the user's API key for the given provider."""
+    encrypted = encrypt_api_key(body.key)
+    stmt = (
+        pg_insert(UserApiKey)
+        .values(
+            user_id=current_user.id,
+            provider=body.provider.value,
+            encrypted_key=encrypted,
+        )
+        .on_conflict_do_update(
+            constraint="uq_user_api_keys_user_provider",
+            set_={"encrypted_key": encrypted},
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+@router.delete("/me/api-key", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_api_key(
+    body: ApiKeyDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the user's API key for the given provider."""
+    result = await db.execute(
+        select(UserApiKey).where(
+            UserApiKey.user_id == current_user.id,
+            UserApiKey.provider == body.provider.value,
+        )
+    )
+    key_row = result.scalar_one_or_none()
+    if key_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+    await db.delete(key_row)
+    await db.commit()

@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     # Encryption (Fernet key for user API keys at rest)
     encryption_key: str = ""
 
-    # Anthropic platform key
+    # Platform-level LLM keys (fallback if user hasn't set their own)
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
 
     @property
     def sync_database_url(self) -> str:
