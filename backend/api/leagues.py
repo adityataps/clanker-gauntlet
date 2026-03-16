@@ -16,9 +16,17 @@ from backend.db.models import (
     LeagueMembership,
     LeagueMembershipRole,
     LeagueMembershipStatus,
+    MembershipRole,
+    PriorityReset,
+    ScriptSpeed,
     Session,
     SessionCreationPolicy,
+    SessionMembership,
+    SessionStatus,
+    Team,
+    TeamType,
     User,
+    WaiverMode,
 )
 from backend.db.session import get_db
 from backend.league.membership import handle_member_exit
@@ -85,6 +93,35 @@ class InviteByEmailRequest(BaseModel):
 
 class ChangeMemberRoleRequest(BaseModel):
     role: LeagueMembershipRole
+
+
+class SessionCreate(BaseModel):
+    name: str
+    script_id: uuid.UUID
+    sport: str
+    season: int
+    script_speed: ScriptSpeed
+    waiver_mode: WaiverMode = WaiverMode.FAAB
+    priority_reset: PriorityReset | None = None
+    compression_factor: int | None = None
+    max_teams: int = 12
+    scoring_config: dict = {}
+
+
+class SessionResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    sport: str
+    season: int
+    status: str
+    script_speed: ScriptSpeed
+    waiver_mode: WaiverMode
+    max_teams: int
+    league_id: uuid.UUID | None
+    owner_id: uuid.UUID
+    team_id: uuid.UUID  # the creator's team
+
+    model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------
@@ -498,3 +535,74 @@ async def list_invites(
         )
         for inv in invites
     ]
+
+
+@router.post("/{league_id}/sessions", response_model=SessionResponse, status_code=201)
+async def create_session(
+    league_id: uuid.UUID,
+    body: SessionCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    league = await _get_league_or_404(league_id, db)
+    membership = await _require_active_member(league_id, current_user.id, db)
+
+    if (
+        league.session_creation == SessionCreationPolicy.MANAGER_ONLY
+        and membership.role != LeagueMembershipRole.MANAGER
+    ):
+        raise HTTPException(status_code=403, detail="Only the league manager can create sessions")
+
+    if body.max_teams < 2 or body.max_teams > 20:
+        raise HTTPException(status_code=422, detail="max_teams must be between 2 and 20")
+
+    session = Session(
+        owner_id=current_user.id,
+        script_id=body.script_id,
+        league_id=league_id,
+        name=body.name,
+        sport=body.sport,
+        season=body.season,
+        status=SessionStatus.DRAFT_PENDING,
+        script_speed=body.script_speed,
+        waiver_mode=body.waiver_mode,
+        priority_reset=body.priority_reset,
+        compression_factor=body.compression_factor,
+        max_teams=body.max_teams,
+        scoring_config=body.scoring_config,
+    )
+    db.add(session)
+    await db.flush()
+
+    team = Team(
+        session_id=session.id,
+        name=current_user.display_name,
+        type=TeamType.HUMAN,
+        config={},
+        faab_balance=100,
+    )
+    db.add(team)
+    await db.flush()
+
+    sm = SessionMembership(
+        session_id=session.id,
+        user_id=current_user.id,
+        role=MembershipRole.OWNER,
+        team_id=team.id,
+    )
+    db.add(sm)
+    await db.commit()
+
+    return SessionResponse(
+        id=session.id,
+        name=session.name,
+        sport=session.sport,
+        season=session.season,
+        status=session.status,
+        script_speed=session.script_speed,
+        waiver_mode=session.waiver_mode,
+        max_teams=session.max_teams,
+        league_id=session.league_id,
+        owner_id=session.owner_id,
+        team_id=team.id,
+    )
