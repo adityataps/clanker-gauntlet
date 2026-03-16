@@ -126,6 +126,16 @@ export interface paths {
     };
   };
   "/leagues/{league_id}/members": {
+    get: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["MemberResponse"][];
+          };
+        };
+      };
+    };
     post: {
       parameters: { path: { league_id: string } };
       requestBody: {

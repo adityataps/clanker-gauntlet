@@ -5,6 +5,10 @@ import { LoginPage } from "@/pages/Login";
 import { RegisterPage } from "@/pages/Register";
 import { DashboardPage } from "@/pages/Dashboard";
 import { AccountPage } from "@/pages/Account";
+import { LeagueNewPage } from "@/pages/LeagueNew";
+import { LeaguePage } from "@/pages/League";
+import { SessionPage } from "@/pages/Session";
+import { JoinLeaguePage } from "@/pages/JoinLeague";
 import { NotFoundPage } from "@/pages/NotFound";
 
 export default function App() {
@@ -22,10 +26,32 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/account" element={<AccountPage />} />
 
-            {/* League + session routes — stubs for now */}
+            {/* Invite redemption */}
+            <Route path="/join/:token" element={<JoinLeaguePage />} />
+
+            {/* League pages */}
+            <Route path="/leagues/new" element={<LeagueNewPage />} />
+            <Route path="/leagues/:leagueId" element={<LeaguePage />} />
+
+            {/* Session pages */}
+            <Route path="/leagues/:leagueId/sessions/:sessionId" element={<SessionPage />} />
+
+            {/* Sub-session pages — stubs until Phase 2 UI lands */}
             <Route
-              path="/leagues/*"
-              element={<div className="p-8 text-muted-foreground">League pages coming soon.</div>}
+              path="/leagues/:leagueId/sessions/:sessionId/lineup"
+              element={
+                <div className="p-8 text-muted-foreground">Lineup editor — coming soon.</div>
+              }
+            />
+            <Route
+              path="/leagues/:leagueId/sessions/:sessionId/waivers"
+              element={
+                <div className="p-8 text-muted-foreground">Waiver claims — coming soon.</div>
+              }
+            />
+            <Route
+              path="/leagues/:leagueId/sessions/:sessionId/trades"
+              element={<div className="p-8 text-muted-foreground">Trades — coming soon.</div>}
             />
 
             <Route path="*" element={<NotFoundPage />} />
