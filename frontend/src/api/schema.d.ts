@@ -1,0 +1,444 @@
+/**
+ * AUTO-GENERATED — do not edit by hand.
+ * Run `npm run generate-api` to regenerate from the live backend schema.
+ *
+ * Source: http://localhost:8000/openapi.json
+ */
+
+export interface paths {
+  "/auth/register": {
+    post: {
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["RegisterRequest"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["TokenResponse"];
+          };
+        };
+        422: { content: { "application/json": components["schemas"]["HTTPValidationError"] } };
+      };
+    };
+  };
+  "/auth/login": {
+    post: {
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["LoginRequest"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["TokenResponse"];
+          };
+        };
+        422: { content: { "application/json": components["schemas"]["HTTPValidationError"] } };
+      };
+    };
+  };
+  "/auth/me": {
+    get: {
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["UserResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/auth/me/api-key": {
+    put: {
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyRequest"];
+        };
+      };
+      responses: { 204: { content: never } };
+    };
+    delete: {
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["ApiKeyDeleteRequest"];
+        };
+      };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/leagues": {
+    get: {
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["LeagueResponse"][];
+          };
+        };
+      };
+    };
+    post: {
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["CreateLeagueRequest"];
+        };
+      };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["LeagueResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/leagues/{league_id}": {
+    get: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["LeagueResponse"];
+          };
+        };
+      };
+    };
+    patch: {
+      parameters: { path: { league_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["UpdateLeagueRequest"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["LeagueResponse"];
+          };
+        };
+      };
+    };
+    delete: {
+      parameters: { path: { league_id: string } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/leagues/{league_id}/members": {
+    post: {
+      parameters: { path: { league_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["AddMemberRequest"];
+        };
+      };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["MemberResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/leagues/{league_id}/members/{user_id}": {
+    delete: {
+      parameters: { path: { league_id: string; user_id: string } };
+      responses: { 204: { content: never } };
+    };
+    patch: {
+      parameters: { path: { league_id: string; user_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["UpdateMemberRequest"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["MemberResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/leagues/{league_id}/members/me/leave": {
+    post: {
+      parameters: { path: { league_id: string } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/leagues/{league_id}/invites": {
+    get: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["InviteResponse"][];
+          };
+        };
+      };
+    };
+    post: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["InviteResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/leagues/join/{token}": {
+    post: {
+      parameters: { path: { token: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["LeagueResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/leagues/{league_id}/sessions": {
+    post: {
+      parameters: { path: { league_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["CreateSessionRequest"];
+        };
+      };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["SessionResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/sessions/{session_id}/join": {
+    post: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["JoinSessionResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/sessions/{session_id}/leave": {
+    post: {
+      parameters: { path: { session_id: string } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/sessions/{session_id}/trades": {
+    get: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["TradeResponse"][];
+          };
+        };
+      };
+    };
+    post: {
+      parameters: { path: { session_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["ProposeTradeRequest"];
+        };
+      };
+      responses: {
+        201: {
+          content: {
+            "application/json": components["schemas"]["TradeResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/trades/{trade_id}": {
+    get: {
+      parameters: { path: { trade_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["TradeResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/trades/{trade_id}/respond": {
+    post: {
+      parameters: { path: { trade_id: string } };
+      requestBody: {
+        content: {
+          "application/json": components["schemas"]["RespondTradeRequest"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["TradeResponse"];
+          };
+        };
+      };
+    };
+  };
+  "/trades/{trade_id}/cancel": {
+    post: {
+      parameters: { path: { trade_id: string } };
+      responses: { 204: { content: never } };
+    };
+  };
+  "/users/search": {
+    get: {
+      parameters: { query: { q: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["UserSearchResult"][];
+          };
+        };
+      };
+    };
+  };
+}
+
+export interface components {
+  schemas: {
+    RegisterRequest: {
+      email: string;
+      password: string;
+      display_name: string;
+    };
+    LoginRequest: {
+      email: string;
+      password: string;
+    };
+    TokenResponse: {
+      access_token: string;
+      token_type: string;
+    };
+    UserResponse: {
+      id: string;
+      email: string;
+      display_name: string;
+      has_keys: Record<string, boolean>;
+    };
+    ApiKeyRequest: {
+      provider: string;
+      api_key: string;
+    };
+    ApiKeyDeleteRequest: {
+      provider: string;
+    };
+    LeagueResponse: {
+      id: string;
+      name: string;
+      description: string | null;
+      sport: string;
+      owner_id: string;
+      session_creation: string;
+      created_at: string;
+      member_count: number;
+      session_count: number;
+      my_role: string | null;
+    };
+    CreateLeagueRequest: {
+      name: string;
+      description?: string | null;
+      sport?: string;
+      session_creation?: string;
+    };
+    UpdateLeagueRequest: {
+      name?: string;
+      description?: string | null;
+      session_creation?: string;
+    };
+    MemberResponse: {
+      user_id: string;
+      display_name: string;
+      email: string;
+      role: string;
+      status: string;
+      joined_at: string | null;
+    };
+    AddMemberRequest: {
+      user_id: string;
+      role?: string;
+    };
+    UpdateMemberRequest: {
+      role: string;
+    };
+    InviteResponse: {
+      id: string;
+      league_id: string;
+      token: string;
+      created_by: string;
+      expires_at: string;
+      used_at: string | null;
+    };
+    CreateSessionRequest: {
+      name: string;
+      script_id: string;
+      mode: string;
+      max_teams?: number;
+      waiver_mode?: string;
+    };
+    SessionResponse: {
+      id: string;
+      name: string;
+      sport: string;
+      status: string;
+      mode: string;
+      max_teams: number;
+      league_id: string | null;
+      created_at: string;
+    };
+    JoinSessionResponse: {
+      session_id: string;
+      team_id: string;
+    };
+    ProposeTradeRequest: {
+      receiving_team_id: string;
+      offered_player_ids: string[];
+      requested_player_ids: string[];
+      note?: string | null;
+      expires_hours?: number;
+    };
+    RespondTradeRequest: {
+      accept: boolean;
+    };
+    TradeResponse: {
+      id: string;
+      session_id: string;
+      proposing_team_id: string;
+      receiving_team_id: string;
+      offered_player_ids: string[];
+      requested_player_ids: string[];
+      status: string;
+      note: string | null;
+      proposed_at: string;
+      resolved_at: string | null;
+      locks: Array<{ player_id: string; locked_until: string }>;
+    };
+    UserSearchResult: {
+      id: string;
+      email: string;
+      display_name: string;
+    };
+    HTTPValidationError: {
+      detail: Array<{ loc: (string | number)[]; msg: string; type: string }>;
+    };
+  };
+}
