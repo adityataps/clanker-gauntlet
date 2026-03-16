@@ -636,10 +636,18 @@ Backend and frontend built together for easier debugging and iteration.
       per-provider model defaults by reasoning depth
 - [x] `user_api_keys` table (replaces `anthropic_api_key_enc`); one row per (user, provider),
       Fernet-encrypted; PUT/DELETE /auth/me/api-key; GET /auth/me returns `has_keys` dict
-- [ ] Trade soft-locking
-- [ ] State persistence + week-boundary snapshots
-- [ ] Session + membership CRUD (invite links)
-- [ ] WebSocket: broadcast session state updates to connected clients
+- [x] League organizational layer — `League`, `LeagueMembership`, `LeagueInvite` models;
+      auto-provisioned personal league on registration; 12+ endpoints (`backend/api/leagues.py`);
+      manager transfer; email/username search + invite link flows; session creation policy
+- [x] Session + membership CRUD — `POST /{league_id}/sessions`, `POST /{session_id}/join`,
+      `POST /{session_id}/leave`; bot takeover on IN_PROGRESS leave; invite link generation + join
+- [x] Trade soft-locking — `backend/league/trades.py` (acquire/release locks, expire stale,
+      execute_roster_swap); `backend/api/trades.py` (propose, list, detail, respond, cancel);
+      409 on conflicting locks; atomic lock+proposal creation via flush()
+- [x] State persistence + week-boundary snapshots — `EventRunner._take_snapshot()` writes to DB;
+      `EventRunnerService._load_world_state()` resumes from latest snapshot on restart
+- [x] WebSocket — `WS /ws/sessions/{session_id}?token=<jwt>`; Redis XREAD with 500ms blocking;
+      delivers `{type, seq, payload}` to connected clients in real time
 
 **Frontend**
 
@@ -697,8 +705,10 @@ JWT_SECRET_KEY=...              # required if AUTH_PROVIDER=jwt
 # Encryption
 ENCRYPTION_KEY=...              # for encrypting user Anthropic API keys at rest
 
-# Anthropic
-ANTHROPIC_API_KEY=...           # platform-level key (fallback if user has no key set)
+# Platform-level LLM fallback keys (used when user has no key set for that provider)
+ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...
+GEMINI_API_KEY=...
 ```
 
 ## Commands
@@ -736,16 +746,11 @@ cd frontend && npx playwright test
 
 ## Current Status (as of March 2026)
 
-Phase 1 backend is ~75% complete. Infrastructure, auth, data layer, core simulation engine (ScriptCompiler, scoring, EventRunner, AgentTeam, waiver resolution) are all done. Remaining Phase 1 backend work is session/membership CRUD, trade soft-locking, WebSocket, and user API key endpoints. Frontend not yet started.
+Phase 1 backend is complete. All infrastructure, auth, data layer, simulation engine, agent system, waiver resolution, league/session management, trade soft-locking, WebSocket, and multi-provider LLM support are implemented. Frontend not yet started.
 
 **Remaining Phase 1 work:**
 
-1. Trade soft-locking (`trade_locks` table, reject proposals that include locked players)
-2. State persistence — week-boundary snapshots written by EventRunner (schema done, writer not wired)
-3. Session + membership CRUD — create session, invite link generation, join via token
-4. WebSocket — broadcast `session:{id}:events` Redis Stream to connected UI clients
-5. User API key management endpoints (PUT/DELETE /users/me/api-key)
-6. React + Vite frontend scaffold — wire up alongside WebSocket
+1. React + Vite frontend scaffold — the only remaining Phase 1 item
 
 ---
 
@@ -761,13 +766,10 @@ The auth endpoints (register → login → `/auth/me`) have been implemented but
 The Sleeper player universe disk cache (`data_cache/nfl_players.json`) is gitignored and only created on first run. New contributors on a clean clone will need to run the app once (or the ScriptCompiler) before the cache exists. README setup steps note this.
 
 **Frontend is absent**
-The EventRunner and AgentTeam are complete but have no WebSocket consumer to push state to. End-to-end verification (agent decisions visible in UI, live score ticking) is blocked until the frontend scaffold and WebSocket broadcaster land.
-
-**Snapshot writer not yet wired**
-`WorldState.to_snapshot()` / `from_snapshot()` are implemented and tested. The EventRunner calls `_take_snapshot()` at WEEK_END, but the DB write is a stub — the snapshots table is defined in the schema but the insert is not yet wired to the real DB session. Seek/resume will not work until this is completed.
+The backend is complete but has no UI consumer. End-to-end verification (agent decisions visible in UI, live score ticking) is blocked until the React + Vite frontend scaffold lands.
 
 **Auth unit tests missing**
-The 166-test suite covers scoring, world state, waivers, and the event runner. Auth endpoints (register, login, `/auth/me`) have no tests. These should be added before the frontend ships to avoid shipping a broken auth flow.
+The test suite covers scoring, world state, waivers, and the event runner. Auth endpoints (register, login, `/auth/me`) have no tests. These should be added before the frontend ships to avoid shipping a broken auth flow.
 
 ---
 
