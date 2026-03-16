@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -12,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { api } from "@/api/client";
 
 export function LeagueNewPage() {
@@ -20,6 +22,7 @@ export function LeagueNewPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [sessionCreation, setSessionCreation] = useState("manager_only");
+  const [allowSharedKey, setAllowSharedKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +37,7 @@ export function LeagueNewPage() {
           description: description.trim() || null,
           sport: "nfl",
           session_creation: sessionCreation,
+          allow_shared_key: allowSharedKey,
         },
       });
       if (apiError || !data) throw new Error("Failed to create league");
@@ -81,7 +85,7 @@ export function LeagueNewPage() {
 
             <div className="space-y-1.5">
               <Label htmlFor="description">
-                Description <span className="text-muted-foreground font-normal">(optional)</span>
+                Description <span className="font-normal text-muted-foreground">(optional)</span>
               </Label>
               <Input
                 id="description"
@@ -107,6 +111,31 @@ export function LeagueNewPage() {
                 Controls who can spin up new simulation sessions inside this league.
               </p>
             </div>
+
+            <Separator />
+
+            {/* Shared key toggle */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">League shared API key</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Allow members without their own LLM key to use a league-level key set by you.
+                  Members with their own key always use it instead.
+                </p>
+              </div>
+              <Switch
+                checked={allowSharedKey}
+                onCheckedChange={setAllowSharedKey}
+                aria-label="Enable league shared key"
+              />
+            </div>
+
+            {allowSharedKey && (
+              <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                After creating the league, go to the <strong>Settings</strong> tab to add your API
+                key. The key is encrypted at rest and only used for agent decisions.
+              </p>
+            )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 

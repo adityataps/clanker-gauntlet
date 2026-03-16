@@ -289,6 +289,9 @@ class League(Base):
     )
     max_members: Mapped[int] = mapped_column(Integer, default=100)
     is_auto_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # When True, agents in this league may fall back to the league-level API key
+    # if the acting user has no key of their own for the relevant provider.
+    allow_shared_key: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -299,6 +302,38 @@ class League(Base):
     )
     invites: Mapped[list["LeagueInvite"]] = relationship(
         back_populates="league", cascade="all, delete-orphan"
+    )
+    api_keys: Mapped[list["LeagueApiKey"]] = relationship(
+        back_populates="league", cascade="all, delete-orphan"
+    )
+
+
+class LeagueApiKey(Base):
+    """
+    Per-provider encrypted API key set by the league manager.
+    Used as a fallback when a member has no user-level key for that provider.
+    Only active when league.allow_shared_key is True.
+    One row per (league, provider).
+    """
+
+    __tablename__ = "league_api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("leagues.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(SAEnum(LLMProvider, native_enum=False), nullable=False)
+    encrypted_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    league: Mapped["League"] = relationship(back_populates="api_keys")
+
+    __table_args__ = (
+        UniqueConstraint("league_id", "provider", name="uq_league_api_keys_league_provider"),
+        Index("ix_league_api_keys_league", "league_id"),
     )
 
 

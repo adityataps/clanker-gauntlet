@@ -125,6 +125,36 @@ export interface paths {
       responses: { 204: { content: never } };
     };
   };
+  "/leagues/{league_id}/api-key": {
+    get: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["LeagueApiKeyStatusResponse"];
+          };
+        };
+      };
+    };
+    put: {
+      parameters: { path: { league_id: string } };
+      requestBody: {
+        content: {
+          "application/json": { provider: string; api_key: string };
+        };
+      };
+      responses: { 204: { content: never } };
+    };
+    delete: {
+      parameters: { path: { league_id: string } };
+      requestBody: {
+        content: {
+          "application/json": { provider: string };
+        };
+      };
+      responses: { 204: { content: never } };
+    };
+  };
   "/leagues/{league_id}/members": {
     get: {
       parameters: { path: { league_id: string } };
@@ -359,21 +389,28 @@ export interface components {
       sport: string;
       owner_id: string;
       session_creation: string;
+      allow_shared_key: boolean;
+      has_league_keys: Record<string, boolean>;
       created_at: string;
       member_count: number;
       session_count: number;
       my_role: string | null;
+    };
+    LeagueApiKeyStatusResponse: {
+      has_keys: Record<string, boolean>;
     };
     CreateLeagueRequest: {
       name: string;
       description?: string | null;
       sport?: string;
       session_creation?: string;
+      allow_shared_key?: boolean;
     };
     UpdateLeagueRequest: {
       name?: string;
       description?: string | null;
       session_creation?: string;
+      allow_shared_key?: boolean;
     };
     MemberResponse: {
       user_id: string;

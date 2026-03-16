@@ -11,6 +11,10 @@ import {
   Layers,
   MoreHorizontal,
   Loader2,
+  Eye,
+  EyeOff,
+  Save,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -445,6 +451,194 @@ function SessionsTab({
   );
 }
 
+// ─── Settings tab ────────────────────────────────────────────────────────────
+
+const PROVIDERS = [
+  { key: "anthropic", label: "Anthropic (Claude)" },
+  { key: "openai", label: "OpenAI (GPT)" },
+  { key: "gemini", label: "Google (Gemini)" },
+] as const;
+
+type ProviderKey = (typeof PROVIDERS)[number]["key"];
+
+function LeagueApiKeyRow({
+  leagueId,
+  providerKey,
+  label,
+  hasKey,
+  onSaved,
+}: {
+  leagueId: string;
+  providerKey: ProviderKey;
+  label: string;
+  hasKey: boolean;
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleSave() {
+    if (!value.trim()) return;
+    setSaving(true);
+    try {
+      await api.PUT("/leagues/{league_id}/api-key", {
+        params: { path: { league_id: leagueId } },
+        body: { provider: providerKey, api_key: value.trim() },
+      });
+      setValue("");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.DELETE("/leagues/{league_id}/api-key", {
+        params: { path: { league_id: leagueId } },
+        body: { provider: providerKey },
+      });
+      onSaved();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>{label}</Label>
+        {hasKey ? (
+          <Badge variant="secondary" className="text-xs">
+            Key saved
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-xs text-muted-foreground">
+            Not set
+          </Badge>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Input
+            type={visible ? "text" : "password"}
+            placeholder={hasKey ? "Enter new key to replace…" : "sk-…"}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="pr-9"
+          />
+          <button
+            type="button"
+            onClick={() => setVisible((v) => !v)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
+        <Button size="sm" onClick={handleSave} disabled={!value.trim() || saving}>
+          <Save className="mr-1.5 h-3.5 w-3.5" />
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        {hasKey && (
+          <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab({
+  league,
+  isManager,
+  onLeagueUpdated,
+}: {
+  league: League;
+  isManager: boolean;
+  onLeagueUpdated: (updated: Partial<League>) => void;
+}) {
+  const [hasKeys, setHasKeys] = useState<Record<string, boolean>>(league.has_league_keys ?? {});
+  const [allowSharedKey, setAllowSharedKey] = useState(league.allow_shared_key);
+  const [saving, setSaving] = useState(false);
+
+  async function handleToggleSharedKey(enabled: boolean) {
+    setAllowSharedKey(enabled);
+    setSaving(true);
+    try {
+      await api.PATCH("/leagues/{league_id}", {
+        params: { path: { league_id: league.id } },
+        body: { allow_shared_key: enabled },
+      });
+      onLeagueUpdated({ allow_shared_key: enabled });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reloadKeys() {
+    const { data } = await api.GET("/leagues/{league_id}/api-key", {
+      params: { path: { league_id: league.id } },
+    });
+    if (data) setHasKeys(data.has_keys);
+  }
+
+  if (!isManager) {
+    return (
+      <p className="text-sm text-muted-foreground">Only the league manager can view settings.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Shared key toggle */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">League shared API key</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            When enabled, members without their own LLM key will fall back to the league-level key
+            below. Members with their own key always use theirs first.
+          </p>
+        </div>
+        <Switch
+          checked={allowSharedKey}
+          onCheckedChange={handleToggleSharedKey}
+          disabled={saving}
+          aria-label="Toggle league shared key"
+        />
+      </div>
+
+      {allowSharedKey && (
+        <>
+          <Separator />
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-medium">Provider keys</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Keys are encrypted at rest. Only set keys for providers your agent teams use. All
+                members' agent decisions share these rate limits.
+              </p>
+            </div>
+            {PROVIDERS.map(({ key, label }) => (
+              <LeagueApiKeyRow
+                key={key}
+                leagueId={league.id}
+                providerKey={key}
+                label={label}
+                hasKey={hasKeys[key] ?? false}
+                onSaved={reloadKeys}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Page root ────────────────────────────────────────────────────────────────
 
 export function LeaguePage() {
@@ -539,6 +733,7 @@ export function LeaguePage() {
         <TabsList className="mb-6">
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
+          {isManager && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="sessions">
@@ -579,6 +774,22 @@ export function LeaguePage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {isManager && (
+          <TabsContent value="settings">
+            <Card>
+              <CardContent className="pt-6">
+                <SettingsTab
+                  league={league}
+                  isManager={isManager}
+                  onLeagueUpdated={(updated) =>
+                    setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
+                  }
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Leave league (non-managers) */}

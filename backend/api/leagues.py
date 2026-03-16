@@ -8,14 +8,17 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.auth.crypto import encrypt_api_key
 from backend.auth.dependencies import get_current_user
 from backend.db.models import (
     League,
+    LeagueApiKey,
     LeagueInvite,
     LeagueInviteStatus,
     LeagueMembership,
     LeagueMembershipRole,
     LeagueMembershipStatus,
+    LLMProvider,
     MembershipRole,
     PriorityReset,
     ScriptSpeed,
@@ -43,11 +46,13 @@ class LeagueCreate(BaseModel):
     name: str
     session_creation: SessionCreationPolicy = SessionCreationPolicy.MANAGER_ONLY
     max_members: int = 100
+    allow_shared_key: bool = False
 
 
 class LeagueUpdate(BaseModel):
     name: str | None = None
     session_creation: SessionCreationPolicy | None = None
+    allow_shared_key: bool | None = None
 
 
 class LeagueResponse(BaseModel):
@@ -57,10 +62,26 @@ class LeagueResponse(BaseModel):
     session_creation: SessionCreationPolicy
     max_members: int
     is_auto_generated: bool
+    allow_shared_key: bool
     created_at: datetime
     member_count: int
+    # providers for which a league key is currently set (manager-only info)
+    has_league_keys: dict[str, bool] = {}
 
     model_config = {"from_attributes": True}
+
+
+class LeagueApiKeyRequest(BaseModel):
+    provider: LLMProvider
+    api_key: str
+
+
+class LeagueApiKeyDeleteRequest(BaseModel):
+    provider: LLMProvider
+
+
+class LeagueApiKeyStatusResponse(BaseModel):
+    has_keys: dict[str, bool]
 
 
 class MemberResponse(BaseModel):
@@ -172,7 +193,11 @@ async def _member_count(league_id: uuid.UUID, db: AsyncSession) -> int:
     return result.scalar_one()
 
 
-def _league_response(league: League, member_count: int) -> LeagueResponse:
+def _league_response(
+    league: League,
+    member_count: int,
+    has_league_keys: dict[str, bool] | None = None,
+) -> LeagueResponse:
     return LeagueResponse(
         id=league.id,
         name=league.name,
@@ -180,8 +205,10 @@ def _league_response(league: League, member_count: int) -> LeagueResponse:
         session_creation=league.session_creation,
         max_members=league.max_members,
         is_auto_generated=league.is_auto_generated,
+        allow_shared_key=league.allow_shared_key,
         created_at=league.created_at,
         member_count=member_count,
+        has_league_keys=has_league_keys or {},
     )
 
 
@@ -201,6 +228,7 @@ async def create_league(
         created_by=current_user.id,
         session_creation=body.session_creation,
         max_members=body.max_members,
+        allow_shared_key=body.allow_shared_key,
     )
     db.add(league)
     await db.flush()
@@ -266,6 +294,8 @@ async def update_league(
         league.name = body.name
     if body.session_creation is not None:
         league.session_creation = body.session_creation
+    if body.allow_shared_key is not None:
+        league.allow_shared_key = body.allow_shared_key
 
     await db.commit()
     await db.refresh(league)
@@ -606,3 +636,80 @@ async def create_session(
         owner_id=session.owner_id,
         team_id=team.id,
     )
+
+
+# ---------------------------------------------------------------------------
+# League API key endpoints (manager-only)
+# ---------------------------------------------------------------------------
+
+
+async def _league_key_status(league_id: uuid.UUID, db: AsyncSession) -> dict[str, bool]:
+    """Return {provider: True} for every provider with a key set on this league."""
+    result = await db.execute(
+        select(LeagueApiKey.provider).where(LeagueApiKey.league_id == league_id)
+    )
+    return {row[0]: True for row in result.all()}
+
+
+@router.get("/{league_id}/api-key", response_model=LeagueApiKeyStatusResponse)
+async def get_league_api_key_status(
+    league_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Return which providers have a league key set. Manager-only."""
+    await _require_manager(league_id, current_user.id, db)
+    return LeagueApiKeyStatusResponse(has_keys=await _league_key_status(league_id, db))
+
+
+@router.put("/{league_id}/api-key", status_code=status.HTTP_204_NO_CONTENT)
+async def set_league_api_key(
+    league_id: uuid.UUID,
+    body: LeagueApiKeyRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert an encrypted API key for the given provider. Manager-only."""
+    await _require_manager(league_id, current_user.id, db)
+    await _get_league_or_404(league_id, db)
+
+    encrypted = encrypt_api_key(body.api_key)
+
+    existing = await db.scalar(
+        select(LeagueApiKey).where(
+            LeagueApiKey.league_id == league_id,
+            LeagueApiKey.provider == body.provider.value,
+        )
+    )
+    if existing:
+        existing.encrypted_key = encrypted
+    else:
+        db.add(
+            LeagueApiKey(
+                league_id=league_id,
+                provider=body.provider.value,
+                encrypted_key=encrypted,
+            )
+        )
+    await db.commit()
+
+
+@router.delete("/{league_id}/api-key", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_league_api_key(
+    league_id: uuid.UUID,
+    body: LeagueApiKeyDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the league key for a given provider. Manager-only."""
+    await _require_manager(league_id, current_user.id, db)
+
+    existing = await db.scalar(
+        select(LeagueApiKey).where(
+            LeagueApiKey.league_id == league_id,
+            LeagueApiKey.provider == body.provider.value,
+        )
+    )
+    if existing:
+        await db.delete(existing)
+        await db.commit()
