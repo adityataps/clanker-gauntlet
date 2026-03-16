@@ -28,7 +28,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.auth.crypto import encrypt_api_key
 from backend.auth.dependencies import get_current_user
 from backend.config import settings
-from backend.db.models import LLMProvider, User, UserApiKey
+from backend.db.models import (
+    League,
+    LeagueMembership,
+    LeagueMembershipRole,
+    LeagueMembershipStatus,
+    LLMProvider,
+    SessionCreationPolicy,
+    User,
+    UserApiKey,
+)
 from backend.db.session import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -103,6 +112,24 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    # Auto-provision personal league
+    league = League(
+        name=f"{user.display_name}'s League",
+        created_by=user.id,
+        session_creation=SessionCreationPolicy.MANAGER_ONLY,
+        is_auto_generated=True,
+    )
+    db.add(league)
+    await db.flush()
+    membership = LeagueMembership(
+        league_id=league.id,
+        user_id=user.id,
+        role=LeagueMembershipRole.MANAGER,
+        status=LeagueMembershipStatus.ACTIVE,
+    )
+    db.add(membership)
+    await db.commit()
 
     from backend.auth.jwt import create_access_token
 

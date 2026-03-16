@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api.health import router as health_router
+from backend.api.leagues import router as leagues_router
+from backend.api.sessions import router as sessions_router
+from backend.api.users import router as users_router
 from backend.auth.router import router as auth_router
 from backend.config import settings
 
@@ -25,6 +28,9 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(leagues_router)
+app.include_router(users_router)
+app.include_router(sessions_router)
 
 
 @app.get("/")

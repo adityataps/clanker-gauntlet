@@ -631,7 +631,11 @@ Backend and frontend built together for easier debugging and iteration.
 - [x] FAAB waiver resolution (atomic, sealed-bid; `backend/league/waivers.py`)
 - [x] Priority waiver resolution (ordered claims, one per team per period, fallback to next choice)
 - [x] Priority reset modes: rolling, season-long, weekly-standings (`WorldState`)
-- [ ] User API key management endpoints (PUT/DELETE /users/me/api-key)
+- [x] Multi-provider LLM support — `BaseLLMClient` ABC; `AnthropicClient`, `OpenAIClient`,
+      `GeminiClient` in `backend/agents/llm_providers/`; `llm_factory.build_llm_client()`;
+      per-provider model defaults by reasoning depth
+- [x] `user_api_keys` table (replaces `anthropic_api_key_enc`); one row per (user, provider),
+      Fernet-encrypted; PUT/DELETE /auth/me/api-key; GET /auth/me returns `has_keys` dict
 - [ ] Trade soft-locking
 - [ ] State persistence + week-boundary snapshots
 - [ ] Session + membership CRUD (invite links)

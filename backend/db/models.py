@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -82,6 +83,29 @@ class MembershipRole(StrEnum):
     OWNER = "owner"
     MEMBER = "member"
     OBSERVER = "observer"
+
+
+class LeagueMembershipRole(StrEnum):
+    MANAGER = "manager"
+    MEMBER = "member"
+
+
+class LeagueMembershipStatus(StrEnum):
+    ACTIVE = "active"
+    LEFT = "left"
+    REMOVED = "removed"
+
+
+class SessionCreationPolicy(StrEnum):
+    MANAGER_ONLY = "manager_only"
+    ANY_MEMBER = "any_member"
+
+
+class LeagueInviteStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    EXPIRED = "expired"
 
 
 class TeamType(StrEnum):
@@ -248,6 +272,101 @@ class UserApiKey(Base):
     )
 
 
+class League(Base):
+    """A named group that owns sessions and manages membership."""
+
+    __tablename__ = "leagues"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    session_creation: Mapped[str] = mapped_column(
+        SAEnum(SessionCreationPolicy, native_enum=False),
+        nullable=False,
+        default=SessionCreationPolicy.MANAGER_ONLY,
+    )
+    max_members: Mapped[int] = mapped_column(Integer, default=100)
+    is_auto_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    memberships: Mapped[list["LeagueMembership"]] = relationship(
+        back_populates="league", cascade="all, delete-orphan"
+    )
+    invites: Mapped[list["LeagueInvite"]] = relationship(
+        back_populates="league", cascade="all, delete-orphan"
+    )
+
+
+class LeagueMembership(Base):
+    """Tracks which users belong to which league and in what role."""
+
+    __tablename__ = "league_memberships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("leagues.id"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(
+        SAEnum(LeagueMembershipRole, native_enum=False), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        SAEnum(LeagueMembershipStatus, native_enum=False),
+        nullable=False,
+        default=LeagueMembershipStatus.ACTIVE,
+    )
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    league: Mapped["League"] = relationship(back_populates="memberships")
+
+    __table_args__ = (
+        UniqueConstraint("league_id", "user_id", name="uq_league_memberships_league_user"),
+        Index("ix_league_memberships_league", "league_id"),
+        Index("ix_league_memberships_user", "user_id"),
+    )
+
+
+class LeagueInvite(Base):
+    """Expiring invite token for joining a league."""
+
+    __tablename__ = "league_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    league_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("leagues.id"), nullable=False
+    )
+    token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    invited_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    invited_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(
+        SAEnum(LeagueInviteStatus, native_enum=False),
+        nullable=False,
+        default=LeagueInviteStatus.PENDING,
+    )
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    league: Mapped["League"] = relationship(back_populates="invites")
+
+    __table_args__ = (Index("ix_league_invites_league", "league_id"),)
+
+
 class SessionInvite(Base):
     """Expiring invite token for joining a session."""
 
@@ -311,6 +430,10 @@ class Session(Base):
     wall_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_seq: Mapped[int] = mapped_column(Integer, default=0)
     scoring_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    league_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("leagues.id"), nullable=True
+    )
+    max_teams: Mapped[int] = mapped_column(Integer, default=12)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
