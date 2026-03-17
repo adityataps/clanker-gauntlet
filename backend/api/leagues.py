@@ -144,6 +144,7 @@ class SessionResponse(BaseModel):
     league_id: uuid.UUID | None
     owner_id: uuid.UUID
     team_id: uuid.UUID | None = None  # set on create; None when listing
+    current_teams: int = 0  # populated by list endpoints
 
     model_config = {"from_attributes": True}
 
@@ -684,9 +685,13 @@ async def list_sessions(
     await _require_active_member(league_id, current_user.id, db)
 
     result = await db.execute(
-        select(Session).where(Session.league_id == league_id).order_by(Session.created_at.desc())
+        select(Session, func.count(Team.id).label("team_count"))
+        .outerjoin(Team, Team.session_id == Session.id)
+        .where(Session.league_id == league_id)
+        .group_by(Session.id)
+        .order_by(Session.created_at.desc())
     )
-    sessions = result.scalars().all()
+    rows = result.all()
     return [
         SessionResponse(
             id=s.id,
@@ -699,8 +704,9 @@ async def list_sessions(
             max_teams=s.max_teams,
             league_id=s.league_id,
             owner_id=s.owner_id,
+            current_teams=team_count,
         )
-        for s in sessions
+        for s, team_count in rows
     ]
 
 

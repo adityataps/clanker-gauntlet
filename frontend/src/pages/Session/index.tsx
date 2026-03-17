@@ -199,7 +199,7 @@ function EventLog({ events }: { events: EventEntry[] }) {
                       </span>
                     )}
                   </div>
-                  {ev.payload.description != null && (
+                  {ev.payload?.description != null && (
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
                       {String(ev.payload.description)}
                     </p>
@@ -255,7 +255,7 @@ export function SessionPage() {
         id: `${Date.now()}-${Math.random()}`,
         type: ev.type,
         seq: ev.seq,
-        payload: ev.payload,
+        payload: ev.payload ?? {},
         receivedAt: new Date(),
       },
     ]);

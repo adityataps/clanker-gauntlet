@@ -116,6 +116,47 @@ function SessionStatusBadge({ status }: { status: string }) {
   );
 }
 
+// ─── Speed emoji ──────────────────────────────────────────────────────────────
+
+const SPEED_EMOJI: Record<string, string> = {
+  blitz: "⚡",
+  managed: "🕐",
+  immersive: "🌐",
+};
+
+// ─── Session hover card ────────────────────────────────────────────────────────
+
+function SessionHoverCard({ session }: { session: Session }) {
+  return (
+    <div className="pointer-events-none absolute left-[calc(100%+8px)] top-0 z-50 w-52 rounded-sm border border-border bg-card p-3 shadow-lg">
+      <p className="mb-2 truncate font-display text-xs font-bold uppercase tracking-wide text-foreground">
+        {session.name}
+      </p>
+      <div className="space-y-1.5">
+        <Row label="Sport" value={`${session.sport.toUpperCase()} ${session.season}`} />
+        <Row
+          label="Speed"
+          value={`${SPEED_EMOJI[session.script_speed] ?? ""} ${session.script_speed}`}
+        />
+        <Row label="Waiver" value={session.waiver_mode} />
+        <Row label="Teams" value={`${session.current_teams} / ${session.max_teams}`} />
+        <Row label="Status" value={STATUS_LABEL[session.status.toLowerCase()] ?? session.status} />
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-display text-[9px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="font-mono text-[10px] capitalize text-foreground">{value}</span>
+    </div>
+  );
+}
+
 // ─── Script helpers ────────────────────────────────────────────────────────────
 
 type ScriptOption = components["schemas"]["ScriptResponse"];
@@ -700,8 +741,8 @@ function SessionsPanel({
                   <p className="font-medium">{s.name}</p>
                 </div>
                 <p className="mt-0.5 pl-4 font-mono text-[10px] text-muted-foreground">
-                  {s.script_speed.toUpperCase()} · {s.sport.toUpperCase()} {s.season} ·{" "}
-                  {s.max_teams} teams
+                  {SPEED_EMOJI[s.script_speed] ?? ""} {s.script_speed.toUpperCase()} ·{" "}
+                  {s.sport.toUpperCase()} {s.season} · {s.current_teams}/{s.max_teams} teams
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -831,17 +872,22 @@ export function LeaguePage() {
           ) : (
             <div className="space-y-0.5">
               {sessions.map((s) => (
-                <Link
-                  key={s.id}
-                  to={`/leagues/${league.id}/sessions/${s.id}`}
-                  className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <StatusDot status={s.status} />
-                  <span className="flex-1 truncate font-medium">{s.name}</span>
-                  <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
-                    {STATUS_LABEL[s.status.toLowerCase()] ?? s.status}
-                  </span>
-                </Link>
+                <div key={s.id} className="group/session relative">
+                  <Link
+                    to={`/leagues/${league.id}/sessions/${s.id}`}
+                    className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <StatusDot status={s.status} />
+                    <span className="flex-1 truncate font-medium">{s.name}</span>
+                    <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
+                      {SPEED_EMOJI[s.script_speed] ?? ""}{" "}
+                      {STATUS_LABEL[s.status.toLowerCase()] ?? s.status}
+                    </span>
+                  </Link>
+                  <div className="invisible opacity-0 transition-all duration-150 group-hover/session:visible group-hover/session:opacity-100">
+                    <SessionHoverCard session={s} />
+                  </div>
+                </div>
               ))}
             </div>
           )}

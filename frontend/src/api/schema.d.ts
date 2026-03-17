@@ -558,6 +558,7 @@ export interface components {
       owner_id: string;
       team_id?: string | null;
       created_at: string;
+      current_teams: number;
     };
     JoinSessionResponse: {
       session_id: string;
