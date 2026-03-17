@@ -12,6 +12,7 @@ import { SessionPage } from "@/pages/Session";
 import { JoinLeaguePage } from "@/pages/JoinLeague";
 import { LineupPage } from "@/pages/Lineup";
 import { useAuthStore } from "@/store/authStore";
+import { AdminPage } from "@/pages/Admin";
 import { NotFoundPage } from "@/pages/NotFound";
 
 export default function App() {
@@ -59,6 +60,13 @@ export default function App() {
             />
 
             <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Route>
+
+        {/* Admin — inside AppShell but handles 403 itself; no separate ProtectedRoute guard */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppShell />}>
+            <Route path="/admin" element={<AdminPage />} />
           </Route>
         </Route>
 

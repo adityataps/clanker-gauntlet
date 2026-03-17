@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis as AsyncRedis
 from starlette.middleware.sessions import SessionMiddleware
 
+from backend.api.admin import router as admin_router
 from backend.api.health import router as health_router
 from backend.api.leagues import router as leagues_router
 from backend.api.scripts import router as scripts_router
@@ -52,6 +53,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin_router)
 app.include_router(health_router)
 app.include_router(scripts_router)
 app.include_router(auth_router)

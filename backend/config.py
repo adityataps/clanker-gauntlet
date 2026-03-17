@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
 
+    # Admin access — comma-separated email addresses
+    admin_emails: str = ""
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
     @property
     def sync_database_url(self) -> str:
         """Alembic-compatible synchronous URL derived from the async URL."""

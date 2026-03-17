@@ -418,6 +418,38 @@ export interface paths {
       };
     };
   };
+  "/admin/stats": {
+    get: {
+      responses: { 200: { content: { "application/json": components["schemas"]["AdminStats"] } } };
+    };
+  };
+  "/admin/users": {
+    get: {
+      responses: { 200: { content: { "application/json": components["schemas"]["AdminUser"][] } } };
+    };
+  };
+  "/admin/leagues": {
+    get: {
+      responses: {
+        200: { content: { "application/json": components["schemas"]["AdminLeague"][] } };
+      };
+    };
+  };
+  "/admin/scripts": {
+    get: {
+      responses: {
+        200: { content: { "application/json": components["schemas"]["AdminScript"][] } };
+      };
+    };
+  };
+  "/admin/scripts/compile": {
+    post: {
+      requestBody: { content: { "application/json": components["schemas"]["CompileRequest"] } };
+      responses: {
+        202: { content: { "application/json": components["schemas"]["CompileResponse"] } };
+      };
+    };
+  };
 }
 
 export interface components {
@@ -618,6 +650,46 @@ export interface components {
     };
     HTTPValidationError: {
       detail: Array<{ loc: (string | number)[]; msg: string; type: string }>;
+    };
+    AdminStats: {
+      user_count: number;
+      league_count: number;
+      session_count: number;
+      script_count: number;
+    };
+    AdminUser: {
+      id: string;
+      email: string;
+      display_name: string;
+      created_at: string;
+    };
+    AdminLeague: {
+      id: string;
+      name: string;
+      created_by: string;
+      member_count: number;
+      session_count: number;
+      created_at: string;
+    };
+    AdminScript: {
+      id: string;
+      sport: string;
+      season: number;
+      season_type: string;
+      status: string;
+      total_events: number;
+      compiled_at: string | null;
+    };
+    CompileRequest: {
+      sport?: string;
+      season?: number;
+      season_type?: string;
+      force?: boolean;
+    };
+    CompileResponse: {
+      script_id: string;
+      status: string;
+      message: string;
     };
   };
 }
