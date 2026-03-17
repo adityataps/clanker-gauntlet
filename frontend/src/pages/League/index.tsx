@@ -327,8 +327,8 @@ function CreateSessionDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="blitz">⚡ Blitz — as fast as possible</SelectItem>
-                <SelectItem value="managed">🕐 Managed — compressed wall-clock</SelectItem>
-                <SelectItem value="immersive">🌐 Immersive — 1:1 real time</SelectItem>
+                <SelectItem value="managed">⏱️ Managed — compressed wall-clock</SelectItem>
+                <SelectItem value="immersive">🐌 Immersive — 1:1 real time</SelectItem>
               </SelectContent>
             </Select>
           </div>
