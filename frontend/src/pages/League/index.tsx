@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -124,11 +125,29 @@ const SPEED_EMOJI: Record<string, string> = {
   immersive: "🌐",
 };
 
-// ─── Session hover card ────────────────────────────────────────────────────────
+// ─── Session cursor tooltip ───────────────────────────────────────────────────
 
-function SessionHoverCard({ session }: { session: Session }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="pointer-events-none absolute left-[calc(100%+8px)] top-0 z-50 w-52 rounded-sm border border-border bg-card p-3 shadow-lg">
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-display text-[9px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="font-mono text-[10px] capitalize text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function SessionTooltip({ session, x, y }: { session: Session; x: number; y: number }) {
+  // Clamp so it doesn't overflow the right edge
+  const left = Math.min(x + 16, window.innerWidth - 224);
+  const top = y + 12;
+
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-[9999] w-52 rounded-sm border border-border bg-card p-3 shadow-xl"
+      style={{ left, top }}
+    >
       <p className="mb-2 truncate font-display text-xs font-bold uppercase tracking-wide text-foreground">
         {session.name}
       </p>
@@ -142,17 +161,38 @@ function SessionHoverCard({ session }: { session: Session }) {
         <Row label="Teams" value={`${session.current_teams} / ${session.max_teams}`} />
         <Row label="Status" value={STATUS_LABEL[session.status.toLowerCase()] ?? session.status} />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function SessionSidebarItem({ session, leagueId }: { session: Session; leagueId: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleMouseMove(e: React.MouseEvent) {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    setPos({ x: e.clientX, y: e.clientY });
+  }
+
+  function handleMouseLeave() {
+    leaveTimer.current = setTimeout(() => setPos(null), 80);
+  }
+
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="font-display text-[9px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="font-mono text-[10px] capitalize text-foreground">{value}</span>
+    <div onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+      <Link
+        to={`/leagues/${leagueId}/sessions/${session.id}`}
+        className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <StatusDot status={session.status} />
+        <span className="flex-1 truncate font-medium">{session.name}</span>
+        <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
+          {SPEED_EMOJI[session.script_speed] ?? ""}{" "}
+          {STATUS_LABEL[session.status.toLowerCase()] ?? session.status}
+        </span>
+      </Link>
+      {pos && <SessionTooltip session={session} x={pos.x} y={pos.y} />}
     </div>
   );
 }
@@ -872,22 +912,7 @@ export function LeaguePage() {
           ) : (
             <div className="space-y-0.5">
               {sessions.map((s) => (
-                <div key={s.id} className="group/session relative">
-                  <Link
-                    to={`/leagues/${league.id}/sessions/${s.id}`}
-                    className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <StatusDot status={s.status} />
-                    <span className="flex-1 truncate font-medium">{s.name}</span>
-                    <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
-                      {SPEED_EMOJI[s.script_speed] ?? ""}{" "}
-                      {STATUS_LABEL[s.status.toLowerCase()] ?? s.status}
-                    </span>
-                  </Link>
-                  <div className="invisible opacity-0 transition-all duration-150 group-hover/session:visible group-hover/session:opacity-100">
-                    <SessionHoverCard session={s} />
-                  </div>
-                </div>
+                <SessionSidebarItem key={s.id} session={s} leagueId={league.id} />
               ))}
             </div>
           )}
