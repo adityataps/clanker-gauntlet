@@ -1,25 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
 import {
-  ArrowLeft,
   Plus,
   Copy,
   Check,
   UserMinus,
-  Crown,
-  Users,
-  Layers,
   MoreHorizontal,
   Loader2,
   Eye,
   EyeOff,
   Save,
   Trash2,
-  Settings,
   Play,
   Pause,
 } from "lucide-react";
+import { LeagueSidebar, StatusDot } from "@/components/LeagueSidebar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -62,14 +57,6 @@ type ActiveView = "sessions" | "members" | "settings";
 
 // ─── Session status helpers ────────────────────────────────────────────────────
 
-const STATUS_DOT: Record<string, string> = {
-  draft_pending: "bg-muted-foreground/40",
-  draft_in_progress: "bg-sky-400",
-  in_progress: "bg-primary",
-  paused: "bg-amber-400",
-  completed: "bg-muted-foreground/30",
-};
-
 const STATUS_LABEL: Record<string, string> = {
   draft_pending: "Setup",
   draft_in_progress: "Draft",
@@ -77,24 +64,6 @@ const STATUS_LABEL: Record<string, string> = {
   paused: "Paused",
   completed: "Done",
 };
-
-function StatusDot({ status }: { status: string }) {
-  const key = status.toLowerCase();
-  const isLive = key === "in_progress";
-  return (
-    <span className="relative flex h-2 w-2 shrink-0 items-center justify-center">
-      {isLive && (
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
-      )}
-      <span
-        className={cn(
-          "relative inline-flex h-1.5 w-1.5 rounded-full",
-          STATUS_DOT[key] ?? "bg-muted-foreground/40"
-        )}
-      />
-    </span>
-  );
-}
 
 function SessionStatusBadge({ status }: { status: string }) {
   const key = status.toLowerCase();
@@ -125,78 +94,6 @@ const SPEED_EMOJI: Record<string, string> = {
   managed: "⏱️",
   immersive: "🐌",
 };
-
-// ─── Session cursor tooltip ───────────────────────────────────────────────────
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="font-display text-[9px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="font-mono text-[10px] capitalize text-foreground">{value}</span>
-    </div>
-  );
-}
-
-function SessionTooltip({ session, x, y }: { session: Session; x: number; y: number }) {
-  // Clamp so it doesn't overflow the right edge
-  const left = Math.min(x + 16, window.innerWidth - 224);
-  const top = y + 12;
-
-  return createPortal(
-    <div
-      className="pointer-events-none fixed z-[9999] w-52 rounded-sm border border-border bg-card p-3 shadow-xl"
-      style={{ left, top }}
-    >
-      <p className="mb-2 truncate font-display text-xs font-bold uppercase tracking-wide text-foreground">
-        {session.name}
-      </p>
-      <div className="space-y-1.5">
-        <Row label="Sport" value={`${session.sport.toUpperCase()} ${session.season}`} />
-        <Row
-          label="Speed"
-          value={`${SPEED_EMOJI[session.script_speed] ?? ""} ${session.script_speed}`}
-        />
-        <Row label="Waiver" value={session.waiver_mode} />
-        <Row label="Teams" value={`${session.current_teams} / ${session.max_teams}`} />
-        {session.current_week > 0 && <Row label="Week" value={`${session.current_week}`} />}
-        <Row label="Status" value={STATUS_LABEL[session.status.toLowerCase()] ?? session.status} />
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-function SessionSidebarItem({ session, leagueId }: { session: Session; leagueId: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function handleMouseMove(e: React.MouseEvent) {
-    if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    setPos({ x: e.clientX, y: e.clientY });
-  }
-
-  function handleMouseLeave() {
-    leaveTimer.current = setTimeout(() => setPos(null), 80);
-  }
-
-  return (
-    <div onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
-      <Link
-        to={`/leagues/${leagueId}/sessions/${session.id}`}
-        className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <StatusDot status={session.status} />
-        <span className="flex-1 truncate font-medium">{session.name}</span>
-        <span className="font-display text-[8px] tracking-wider text-muted-foreground/50">
-          {SPEED_EMOJI[session.script_speed] ?? ""}
-        </span>
-      </Link>
-      {pos && <SessionTooltip session={session} x={pos.x} y={pos.y} />}
-    </div>
-  );
-}
 
 // ─── Confirm delete dialog ────────────────────────────────────────────────────
 
@@ -1066,14 +963,16 @@ function SessionsPanel({
 export function LeaguePage() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeView, setActiveView] = useState<ActiveView>("sessions");
+  const [activeView, setActiveView] = useState<ActiveView>(
+    (location.state as { activeView?: ActiveView } | null)?.activeView ?? "sessions"
+  );
   const [createOpen, setCreateOpen] = useState(false);
-
   async function load() {
     if (!leagueId) return;
     const [leagueRes, membersRes, sessionsRes] = await Promise.all([
@@ -1117,225 +1016,79 @@ export function LeaguePage() {
   return (
     <div className="flex" style={{ height: "calc(100vh - 48px)" }}>
       {/* ── Sidebar ──────────────────────────────────────────────────────────── */}
-      <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-card">
-        {/* Back */}
-        <div className="border-b border-border px-4 py-3">
-          <button
-            className="flex items-center gap-1.5 font-display text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => navigate("/dashboard")}
-          >
-            <ArrowLeft className="h-3 w-3" />
-            Dashboard
-          </button>
-        </div>
-
-        {/* League identity */}
-        <div className="border-b border-border px-4 py-4">
-          <h1 className="font-display text-base font-bold uppercase tracking-wide leading-tight text-foreground">
-            {league.name}
-          </h1>
-          {league.my_role && (
-            <div className="mt-1 flex items-center gap-1">
-              {isManager && <Crown className="h-2.5 w-2.5 text-primary" />}
-              <span className="font-display text-[10px] uppercase tracking-wider text-muted-foreground">
-                {league.my_role}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Sessions section */}
-        <div className="flex-1 px-2 py-3">
-          <div className="mb-1 flex items-center justify-between px-2">
-            <span className="font-display text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Sessions
-            </span>
-            {canCreate && (
+      <LeagueSidebar
+        league={league}
+        sessions={sessions}
+        activeView={activeView}
+        onNavigateSessions={() => setActiveView("sessions")}
+        onNavigateMembers={() => setActiveView("members")}
+        onNavigateSettings={isManager ? () => setActiveView("settings") : undefined}
+        canCreate={canCreate}
+        onCreateSession={() => setCreateOpen(true)}
+        onBack={() => navigate("/dashboard")}
+        memberCount={members.length}
+        footer={
+          isMember && !isManager ? (
+            <div className="border-t border-border px-2 py-2">
               <button
-                onClick={() => setCreateOpen(true)}
-                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                title="New session"
+                className="w-full rounded-sm px-2 py-2 text-left font-display text-[10px] uppercase tracking-wider text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                onClick={async () => {
+                  if (!leagueId) return;
+                  await api.POST("/leagues/{league_id}/members/me/leave", {
+                    params: { path: { league_id: leagueId } },
+                  });
+                  navigate("/dashboard");
+                }}
               >
-                <Plus className="h-3 w-3" />
+                Leave league
               </button>
-            )}
-          </div>
-
-          {sessions.length === 0 ? (
-            <div className="px-2 py-3">
-              <p className="text-[11px] text-muted-foreground/60">No sessions yet.</p>
-              {canCreate && (
-                <button
-                  onClick={() => setCreateOpen(true)}
-                  className="mt-1 font-display text-[10px] uppercase tracking-wider text-primary hover:underline"
-                >
-                  Create one →
-                </button>
-              )}
             </div>
-          ) : (
-            <div className="space-y-3">
-              {(
-                [
-                  {
-                    key: "live",
-                    label: "Live",
-                    items: sessions.filter(
-                      (s) => s.status === "in_progress" && s.script_speed === "immersive"
-                    ),
-                  },
-                  {
-                    key: "running",
-                    label: "In Progress",
-                    items: sessions.filter(
-                      (s) => s.status === "in_progress" && s.script_speed !== "immersive"
-                    ),
-                  },
-                  {
-                    key: "paused",
-                    label: "Paused",
-                    items: sessions.filter((s) => s.status === "paused"),
-                  },
-                  {
-                    key: "setup",
-                    label: "Setup",
-                    items: sessions.filter(
-                      (s) => s.status === "draft_pending" || s.status === "draft_in_progress"
-                    ),
-                  },
-                  {
-                    key: "done",
-                    label: "Done",
-                    items: sessions.filter((s) => s.status === "completed"),
-                  },
-                ] as const
-              )
-                .filter((g) => g.items.length > 0)
-                .map((group) => (
-                  <div key={group.key}>
-                    <div className="mb-0.5 flex items-center gap-1.5 px-2">
-                      <span className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground/50">
-                        {group.label}
-                      </span>
-                      <div className="h-px flex-1 bg-border/40" />
-                    </div>
-                    <div className="space-y-0.5">
-                      {group.items.map((s) => (
-                        <SessionSidebarItem key={s.id} session={s} leagueId={league.id} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-
-        {/* Nav items */}
-        <div className="border-t border-border px-2 py-2">
-          <button
-            onClick={() => setActiveView("sessions")}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
-              activeView === "sessions"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            )}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Sessions
-            <span className="ml-auto font-mono text-[10px] tabular-nums opacity-60">
-              {sessions.length}
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveView("members")}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
-              activeView === "members"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            )}
-          >
-            <Users className="h-3.5 w-3.5" />
-            Members
-            <span className="ml-auto font-mono text-[10px] tabular-nums opacity-60">
-              {members.length}
-            </span>
-          </button>
-          {isManager && (
-            <button
-              onClick={() => setActiveView("settings")}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
-                activeView === "settings"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Settings
-            </button>
-          )}
-        </div>
-
-        {/* Leave league */}
-        {isMember && !isManager && (
-          <div className="border-t border-border px-2 py-2">
-            <button
-              className="w-full rounded-sm px-2 py-2 text-left font-display text-[10px] uppercase tracking-wider text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-              onClick={async () => {
-                if (!leagueId) return;
-                await api.POST("/leagues/{league_id}/members/me/leave", {
-                  params: { path: { league_id: leagueId } },
-                });
-                navigate("/dashboard");
-              }}
-            >
-              Leave league
-            </button>
-          </div>
-        )}
-      </aside>
+          ) : undefined
+        }
+      />
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto px-8 py-8">
-        {activeView === "sessions" && (
-          <SessionsPanel
-            league={league}
-            sessions={sessions}
-            onNewSession={() => setCreateOpen(true)}
-            canCreate={canCreate}
-            isManager={isManager}
-            onSessionDeleted={(id) => setSessions((prev) => prev.filter((s) => s.id !== id))}
-            onSessionUpdated={(id, patch) =>
-              setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
-            }
-          />
-        )}
-        {activeView === "members" && (
-          <MembersPanel
-            league={league}
-            members={members}
-            isManager={isManager}
-            onRefresh={() => {
-              if (!leagueId) return;
-              api
-                .GET("/leagues/{league_id}/members", {
-                  params: { path: { league_id: leagueId } },
-                })
-                .then(({ data }) => setMembers(data ?? []));
-            }}
-          />
-        )}
-        {activeView === "settings" && isManager && (
-          <SettingsPanel
-            league={league}
-            onLeagueUpdated={(updated) =>
-              setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
-            }
-            onLeagueDeleted={() => navigate("/dashboard")}
-          />
-        )}
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-8 py-8">
+          {activeView === "sessions" && (
+            <SessionsPanel
+              league={league}
+              sessions={sessions}
+              onNewSession={() => setCreateOpen(true)}
+              canCreate={canCreate}
+              isManager={isManager}
+              onSessionDeleted={(id) => setSessions((prev) => prev.filter((s) => s.id !== id))}
+              onSessionUpdated={(id, patch) =>
+                setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+              }
+            />
+          )}
+          {activeView === "members" && (
+            <MembersPanel
+              league={league}
+              members={members}
+              isManager={isManager}
+              onRefresh={() => {
+                if (!leagueId) return;
+                api
+                  .GET("/leagues/{league_id}/members", {
+                    params: { path: { league_id: leagueId } },
+                  })
+                  .then(({ data }) => setMembers(data ?? []));
+              }}
+            />
+          )}
+          {activeView === "settings" && isManager && (
+            <SettingsPanel
+              league={league}
+              onLeagueUpdated={(updated) =>
+                setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
+              }
+              onLeagueDeleted={() => navigate("/dashboard")}
+            />
+          )}
+        </div>
+        {/* end inner scroll area */}
       </main>
 
       {/* ── Dialogs ──────────────────────────────────────────────────────────── */}
