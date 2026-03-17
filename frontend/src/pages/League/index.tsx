@@ -58,18 +58,19 @@ type Invite = components["schemas"]["InviteResponse"];
 // ─── Session status badge ─────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
-  DRAFT_PENDING: "bg-muted text-muted-foreground",
-  DRAFT_IN_PROGRESS: "bg-blue-500/20 text-blue-400",
-  IN_PROGRESS: "bg-green-500/20 text-green-400",
-  PAUSED: "bg-yellow-500/20 text-yellow-400",
-  COMPLETED: "bg-muted text-muted-foreground",
+  draft_pending: "border-border text-muted-foreground",
+  draft_in_progress: "border-sky-500/30 text-sky-400",
+  in_progress: "border-primary/30 text-primary",
+  paused: "border-amber-500/30 text-amber-400",
+  completed: "border-border text-muted-foreground",
 };
 
 function SessionStatusBadge({ status }: { status: string }) {
-  const label = status.replace(/_/g, " ").toLowerCase();
+  const key = status.toLowerCase();
+  const label = key.replace(/_/g, " ");
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_COLORS[status] ?? "bg-muted text-muted-foreground"}`}
+      className={`rounded-sm border px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase tracking-wider ${STATUS_COLORS[key] ?? "border-border text-muted-foreground"}`}
     >
       {label}
     </span>
@@ -704,7 +705,9 @@ export function LeaguePage() {
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{league.name}</h1>
+            <h1 className="font-display text-3xl font-bold uppercase tracking-wide">
+              {league.name}
+            </h1>
             {league.my_role && (
               <Badge variant="secondary" className="capitalize">
                 {league.my_role === "manager" && <Crown className="mr-1 h-3 w-3" />}

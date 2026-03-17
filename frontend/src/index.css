@@ -1,37 +1,44 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Courier New", monospace;
+  --font-display: "Barlow Condensed", sans-serif;
 
-  --color-background: hsl(224 71% 4%);
-  --color-foreground: hsl(213 31% 91%);
+  /* ── Backgrounds ──────────────────────────────────── */
+  --color-background: #0c0c0f;
+  --color-foreground: #f0f0f5;
 
-  --color-card: hsl(224 71% 4%);
-  --color-card-foreground: hsl(213 31% 91%);
+  --color-card: #111115;
+  --color-card-foreground: #f0f0f5;
 
-  --color-popover: hsl(224 71% 4%);
-  --color-popover-foreground: hsl(215 20.2% 65.1%);
+  --color-popover: #16161d;
+  --color-popover-foreground: #f0f0f5;
 
-  --color-primary: hsl(210 40% 98%);
-  --color-primary-foreground: hsl(222.2 47.4% 1.2%);
+  /* ── Brand: acid lime ─────────────────────────────── */
+  --color-primary: #c8ff00;
+  --color-primary-foreground: #0a0a0c;
 
-  --color-secondary: hsl(222.2 47.4% 11.2%);
-  --color-secondary-foreground: hsl(210 40% 98%);
+  /* ── Surfaces ─────────────────────────────────────── */
+  --color-secondary: #1a1a22;
+  --color-secondary-foreground: #f0f0f5;
 
-  --color-muted: hsl(223 47% 11%);
-  --color-muted-foreground: hsl(215.4 16.3% 56.9%);
+  --color-muted: #1a1a22;
+  --color-muted-foreground: #6a6a82;
 
-  --color-accent: hsl(216 34% 17%);
-  --color-accent-foreground: hsl(210 40% 98%);
+  --color-accent: #1c1c26;
+  --color-accent-foreground: #f0f0f5;
 
-  --color-destructive: hsl(0 63% 31%);
-  --color-destructive-foreground: hsl(210 40% 98%);
+  /* ── Semantic ─────────────────────────────────────── */
+  --color-destructive: #ff3547;
+  --color-destructive-foreground: #f0f0f5;
 
-  --color-border: hsl(216 34% 17%);
-  --color-input: hsl(216 34% 17%);
-  --color-ring: hsl(216 34% 17%);
+  --color-border: #1e1e2a;
+  --color-input: #18181e;
+  --color-ring: #c8ff00;
 
-  --radius: 0.5rem;
+  /* ── Geometry ─────────────────────────────────────── */
+  --radius: 0.25rem;
 }
 
 * {
@@ -45,4 +52,54 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Thin scrollbar ───────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a38;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a50;
+}
+
+/* ── Event entry animation ────────────────────────────── */
+@keyframes event-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.event-entry {
+  animation: event-in 0.16s ease-out;
+}
+
+/* ── Score counter animation ──────────────────────────── */
+@keyframes score-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+    color: var(--color-primary);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.score-pop {
+  animation: score-pop 0.3s ease-out;
 }

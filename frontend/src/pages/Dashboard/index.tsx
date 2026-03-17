@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Users, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 
@@ -20,64 +19,83 @@ export function DashboardPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-screen-xl px-4 py-8">
-      <div className="mb-8 flex items-center justify-between">
+    <div className="mx-auto max-w-screen-xl px-4 py-10">
+      {/* Header */}
+      <div className="mb-8 flex items-end justify-between border-b border-border pb-6">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Your leagues and sessions</p>
+          <p className="mb-1 font-display text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+            Overview
+          </p>
+          <h1 className="font-display text-4xl font-bold uppercase tracking-wide text-foreground">
+            Your Leagues
+          </h1>
         </div>
-        <Button asChild size="sm">
+        <Button
+          asChild
+          size="sm"
+          className="rounded-sm font-display text-xs font-bold uppercase tracking-[0.1em]"
+        >
           <Link to="/leagues/new">
-            <Plus className="mr-1.5 h-4 w-4" />
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
             New league
           </Link>
         </Button>
       </div>
 
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-32 animate-pulse rounded-lg border border-border bg-muted" />
+            <div key={i} className="h-36 animate-pulse rounded-sm border border-border bg-card" />
           ))}
         </div>
       ) : leagues.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-20 text-center">
-          <p className="text-muted-foreground">You&apos;re not in any leagues yet.</p>
-          <Button asChild variant="outline" size="sm" className="mt-4">
+        <div className="flex flex-col items-center justify-center rounded-sm border border-dashed border-border py-24 text-center">
+          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-sm border border-border text-muted-foreground">
+            <Layers className="h-4 w-4" />
+          </div>
+          <p className="text-sm text-muted-foreground">You&apos;re not in any leagues yet.</p>
+          <Button asChild variant="outline" size="sm" className="mt-4 rounded-sm text-xs">
             <Link to="/leagues/new">Create your first league</Link>
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {leagues.map((league) => (
             <Link
               key={league.id}
               to={`/leagues/${league.id}`}
-              className="group rounded-lg border border-border bg-card p-5 transition-colors hover:border-primary/50 hover:bg-accent"
+              className="group relative overflow-hidden rounded-sm border border-border bg-card p-5 transition-all hover:border-primary/30 hover:bg-accent"
             >
-              <div className="mb-3 flex items-start justify-between">
-                <h2 className="font-semibold leading-tight">{league.name}</h2>
+              {/* Hover accent stripe */}
+              <div className="absolute inset-x-0 top-0 h-px bg-primary opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <h2 className="font-display text-xl font-bold uppercase tracking-wide leading-tight text-foreground">
+                  {league.name}
+                </h2>
                 {league.my_role && (
-                  <Badge variant="secondary" className="shrink-0 text-xs capitalize">
+                  <span className="mt-0.5 shrink-0 rounded-sm border border-border px-1.5 py-0.5 font-display text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
                     {league.my_role.toLowerCase()}
-                  </Badge>
+                  </span>
                 )}
               </div>
 
               {league.description && (
-                <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
+                <p className="mb-4 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
                   {league.description}
                 </p>
               )}
 
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Users className="h-3.5 w-3.5" />
-                  {league.member_count} {league.member_count === 1 ? "member" : "members"}
+              <div className="flex items-center gap-5 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3 w-3" />
+                  <span className="font-mono tabular-nums">{league.member_count}</span>
+                  <span>{league.member_count === 1 ? "member" : "members"}</span>
                 </span>
-                <span className="flex items-center gap-1">
-                  <Layers className="h-3.5 w-3.5" />
-                  {league.session_count} {league.session_count === 1 ? "session" : "sessions"}
+                <span className="flex items-center gap-1.5">
+                  <Layers className="h-3 w-3" />
+                  <span className="font-mono tabular-nums">{league.session_count}</span>
+                  <span>{league.session_count === 1 ? "session" : "sessions"}</span>
                 </span>
               </div>
             </Link>
