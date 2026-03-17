@@ -1,5 +1,9 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis as AsyncRedis
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api.health import router as health_router
@@ -10,11 +14,30 @@ from backend.api.users import router as users_router
 from backend.api.ws import router as ws_router
 from backend.auth.router import router as auth_router
 from backend.config import settings
+from backend.core.runner_service import EventRunnerService
+from backend.db.session import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ────────────────────────────────────────────────────────────
+    redis = AsyncRedis.from_url(settings.redis_url, decode_responses=True)
+    app.state.redis = redis
+    app.state.runner_service = EventRunnerService(AsyncSessionLocal, redis=redis)
+    logger.info("Redis connected; EventRunnerService ready")
+    yield
+    # ── Shutdown ───────────────────────────────────────────────────────────
+    await redis.aclose()
+    logger.info("Redis connection closed")
+
 
 app = FastAPI(
     title="Clanker Gauntlet",
     description="Fantasy sports simulation platform — AI agents vs. humans",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # SessionMiddleware is required for the Auth0 OAuth callback flow

@@ -42,6 +42,7 @@ Context injection:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -242,6 +243,8 @@ class EventRunner:
         if event.event_type in _AUDITED_EVENT_TYPES:
             await self._audit_event(event)
 
+        await self._broadcast_event(event)
+
     # ------------------------------------------------------------------
     # Context events (NEWS_ITEM, INJURY_UPDATE)
     # ------------------------------------------------------------------
@@ -405,8 +408,7 @@ class EventRunner:
         )
         await self._update_matchup_score(team_id_str, week)
 
-        if self._redis is not None:
-            await self._emit_stat_update(player_id, team_id_str, pts, week)
+        await self._emit_stat_update(player_id, team_id_str, pts, week)
 
     # ------------------------------------------------------------------
     # WEEK_END
@@ -892,16 +894,37 @@ class EventRunner:
                 )
 
     async def _emit_stat_update(self, player_id: str, team_id: str, pts: float, week: int) -> None:
+        """Publish a STAT_UPDATE to the Redis stream. Not stored in DB."""
+        if self._redis is None:
+            return
         try:
             await self._redis.xadd(
                 f"session:{self._session_id}:events",
                 {
-                    "type": "STAT_UPDATE",
-                    "player_id": player_id,
-                    "team_id": team_id,
-                    "pts": str(pts),
-                    "week": str(week),
+                    "event_type": "STAT_UPDATE",
+                    "seq": "0",
+                    "payload": json.dumps(
+                        {"player_id": player_id, "team_id": team_id, "pts": pts, "week": week}
+                    ),
                 },
             )
         except Exception:
             logger.exception("Failed to emit STAT_UPDATE to Redis")
+
+    async def _broadcast_event(self, event: SeasonEvent) -> None:
+        """Publish any processed season event to the Redis stream for WebSocket delivery."""
+        if self._redis is None:
+            return
+        try:
+            await self._redis.xadd(
+                f"session:{self._session_id}:events",
+                {
+                    "event_type": event.event_type,
+                    "seq": str(event.seq),
+                    "payload": json.dumps(event.payload or {}),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to broadcast event type=%s seq=%d", event.event_type, event.seq
+            )
