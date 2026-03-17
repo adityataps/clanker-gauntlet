@@ -67,6 +67,8 @@ class LeagueResponse(BaseModel):
     member_count: int
     # providers for which a league key is currently set (manager-only info)
     has_league_keys: dict[str, bool] = {}
+    # the requesting user's role in this league (None if not a member)
+    my_role: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +89,7 @@ class LeagueApiKeyStatusResponse(BaseModel):
 class MemberResponse(BaseModel):
     user_id: uuid.UUID
     display_name: str
+    email: str
     role: LeagueMembershipRole
     status: LeagueMembershipStatus
     joined_at: datetime
@@ -197,6 +200,7 @@ def _league_response(
     league: League,
     member_count: int,
     has_league_keys: dict[str, bool] | None = None,
+    my_role: str | None = None,
 ) -> LeagueResponse:
     return LeagueResponse(
         id=league.id,
@@ -209,6 +213,7 @@ def _league_response(
         created_at=league.created_at,
         member_count=member_count,
         has_league_keys=has_league_keys or {},
+        my_role=my_role,
     )
 
 
@@ -243,7 +248,7 @@ async def create_league(
     await db.commit()
     await db.refresh(league)
 
-    return _league_response(league, 1)
+    return _league_response(league, 1, my_role="manager")
 
 
 @router.get("", response_model=list[LeagueResponse])
@@ -252,19 +257,19 @@ async def list_leagues(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(League).join(
+        select(League, LeagueMembership).join(
             LeagueMembership,
             (LeagueMembership.league_id == League.id)
             & (LeagueMembership.user_id == current_user.id)
             & (LeagueMembership.status == LeagueMembershipStatus.ACTIVE),
         )
     )
-    leagues = result.scalars().all()
+    rows = result.all()
 
     out = []
-    for league in leagues:
+    for league, membership in rows:
         count = await _member_count(league.id, db)
-        out.append(_league_response(league, count))
+        out.append(_league_response(league, count, my_role=membership.role.value))
     return out
 
 
@@ -274,10 +279,10 @@ async def get_league(
     current_user: Annotated[User, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_active_member(league_id, current_user.id, db)
+    lm = await _require_active_member(league_id, current_user.id, db)
     league = await _get_league_or_404(league_id, db)
     count = await _member_count(league_id, db)
-    return _league_response(league, count)
+    return _league_response(league, count, my_role=lm.role.value)
 
 
 @router.patch("/{league_id}", response_model=LeagueResponse)
@@ -300,7 +305,7 @@ async def update_league(
     await db.commit()
     await db.refresh(league)
     count = await _member_count(league_id, db)
-    return _league_response(league, count)
+    return _league_response(league, count, my_role="manager")
 
 
 @router.delete("/{league_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -318,6 +323,35 @@ async def delete_league(
     # Cascade deletes for memberships and invites happen via ORM relationships
     await db.delete(league)
     await db.commit()
+
+
+@router.get("/{league_id}/members", response_model=list[MemberResponse])
+async def list_members(
+    league_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_active_member(league_id, current_user.id, db)
+    result = await db.execute(
+        select(LeagueMembership, User)
+        .join(User, User.id == LeagueMembership.user_id)
+        .where(
+            LeagueMembership.league_id == league_id,
+            LeagueMembership.status == LeagueMembershipStatus.ACTIVE,
+        )
+        .order_by(LeagueMembership.joined_at)
+    )
+    return [
+        MemberResponse(
+            user_id=lm.user_id,
+            display_name=u.display_name,
+            email=u.email,
+            role=lm.role,
+            status=lm.status,
+            joined_at=lm.joined_at,
+        )
+        for lm, u in result.all()
+    ]
 
 
 @router.post("/{league_id}/members", response_model=MemberResponse, status_code=201)
@@ -364,6 +398,7 @@ async def add_member(
     return MemberResponse(
         user_id=lm.user_id,
         display_name=target_user.display_name,
+        email=target_user.email,
         role=lm.role,
         status=lm.status,
         joined_at=lm.joined_at,
@@ -442,6 +477,7 @@ async def change_member_role(
     return MemberResponse(
         user_id=target_lm.user_id,
         display_name=target_user.display_name,
+        email=target_user.email,
         role=target_lm.role,
         status=target_lm.status,
         joined_at=target_lm.joined_at,
@@ -540,7 +576,7 @@ async def join_league(
 
     league = await _get_league_or_404(invite.league_id, db)
     count = await _member_count(invite.league_id, db)
-    return _league_response(league, count)
+    return _league_response(league, count, my_role="member")
 
 
 @router.get("/{league_id}/invites", response_model=list[InviteResponse])

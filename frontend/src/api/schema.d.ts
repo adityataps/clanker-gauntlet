@@ -451,15 +451,15 @@ export interface components {
     LeagueResponse: {
       id: string;
       name: string;
-      description: string | null;
-      sport: string;
-      owner_id: string;
+      created_by: string;
       session_creation: string;
+      max_members: number;
+      is_auto_generated: boolean;
       allow_shared_key: boolean;
       has_league_keys: Record<string, boolean>;
       created_at: string;
       member_count: number;
-      session_count: number;
+      /** The requesting user's role in this league; null if not a member. */
       my_role: string | null;
     };
     LeagueApiKeyStatusResponse: {
@@ -484,7 +484,7 @@ export interface components {
       email: string;
       role: string;
       status: string;
-      joined_at: string | null;
+      joined_at: string;
     };
     AddMemberRequest: {
       user_id: string;

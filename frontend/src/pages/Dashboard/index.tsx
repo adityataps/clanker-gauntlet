@@ -80,22 +80,11 @@ export function DashboardPage() {
                 )}
               </div>
 
-              {league.description && (
-                <p className="mb-4 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                  {league.description}
-                </p>
-              )}
-
               <div className="flex items-center gap-5 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
                   <Users className="h-3 w-3" />
                   <span className="font-mono tabular-nums">{league.member_count}</span>
                   <span>{league.member_count === 1 ? "member" : "members"}</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Layers className="h-3 w-3" />
-                  <span className="font-mono tabular-nums">{league.session_count}</span>
-                  <span>{league.session_count === 1 ? "session" : "sessions"}</span>
                 </span>
               </div>
             </Link>

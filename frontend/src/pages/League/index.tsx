@@ -797,11 +797,6 @@ export function LeaguePage() {
               </span>
             </div>
           )}
-          {league.description && (
-            <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-              {league.description}
-            </p>
-          )}
         </div>
 
         {/* Sessions section */}
@@ -961,9 +956,6 @@ export function LeaguePage() {
         onOpenChange={setCreateOpen}
         onCreated={(s) => {
           setSessions((prev) => [s, ...prev]);
-          setLeague((prev) =>
-            prev ? { ...prev, session_count: (prev.session_count ?? 0) + 1 } : prev
-          );
         }}
       />
     </div>
