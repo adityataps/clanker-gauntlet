@@ -9,6 +9,7 @@ import { LeagueNewPage } from "@/pages/LeagueNew";
 import { LeaguePage } from "@/pages/League";
 import { SessionPage } from "@/pages/Session";
 import { JoinLeaguePage } from "@/pages/JoinLeague";
+import { LineupPage } from "@/pages/Lineup";
 import { NotFoundPage } from "@/pages/NotFound";
 
 export default function App() {
@@ -37,12 +38,7 @@ export default function App() {
             <Route path="/leagues/:leagueId/sessions/:sessionId" element={<SessionPage />} />
 
             {/* Sub-session pages — stubs until Phase 2 UI lands */}
-            <Route
-              path="/leagues/:leagueId/sessions/:sessionId/lineup"
-              element={
-                <div className="p-8 text-muted-foreground">Lineup editor — coming soon.</div>
-              }
-            />
+            <Route path="/leagues/:leagueId/sessions/:sessionId/lineup" element={<LineupPage />} />
             <Route
               path="/leagues/:leagueId/sessions/:sessionId/waivers"
               element={

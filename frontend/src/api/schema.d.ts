@@ -340,6 +340,23 @@ export interface paths {
       responses: { 204: { content: never } };
     };
   };
+  "/sessions/{session_id}/lineup": {
+    get: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["LineupResponse"] } };
+      };
+    };
+    put: {
+      parameters: { path: { session_id: string } };
+      requestBody: {
+        content: { "application/json": components["schemas"]["SaveLineupRequest"] };
+      };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["LineupResponse"] } };
+      };
+    };
+  };
   "/users/search": {
     get: {
       parameters: { query: { q: string } };
@@ -483,6 +500,25 @@ export interface components {
       id: string;
       email: string;
       display_name: string;
+    };
+    RosterPlayer: {
+      player_id: string;
+      name: string;
+      position: string;
+      nfl_team: string;
+      projected_points: number | null;
+      status: string;
+      opponent: string | null;
+    };
+    LineupResponse: {
+      week: number;
+      deadline: string | null;
+      locked: boolean;
+      slots: Record<string, components["schemas"]["RosterPlayer"] | null>;
+      bench: components["schemas"]["RosterPlayer"][];
+    };
+    SaveLineupRequest: {
+      slots: Record<string, string | null>;
     };
     HTTPValidationError: {
       detail: Array<{ loc: (string | number)[]; msg: string; type: string }>;
