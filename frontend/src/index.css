@@ -54,6 +54,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ── Display font scale (Barlow Condensed appears optically smaller than
+      proportional fonts at the same pt size — nudge it up uniformly) ────── */
+.font-display {
+  font-size: 1em;
+}
+
 /* ── Thin scrollbar ───────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 4px;
