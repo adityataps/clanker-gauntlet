@@ -79,6 +79,12 @@ function SessionStatusBadge({ status }: { status: string }) {
 
 // ─── Create session dialog ────────────────────────────────────────────────────
 
+type ScriptOption = components["schemas"]["ScriptResponse"];
+
+function scriptLabel(s: ScriptOption) {
+  return `${s.sport.toUpperCase()} ${s.season} — ${s.season_type} (${s.total_events} events)`;
+}
+
 function CreateSessionDialog({
   leagueId,
   open,
@@ -91,13 +97,33 @@ function CreateSessionDialog({
   onCreated: (s: Session) => void;
 }) {
   const [name, setName] = useState("");
-  const [mode, setMode] = useState("blitz");
+  const [scriptSpeed, setScriptSpeed] = useState("blitz");
   const [maxTeams, setMaxTeams] = useState("10");
+  const [scripts, setScripts] = useState<ScriptOption[]>([]);
+  const [scriptId, setScriptId] = useState("");
+  const [scriptsLoading, setScriptsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load available scripts when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    setScriptsLoading(true);
+    api
+      .GET("/scripts")
+      .then(({ data }) => {
+        const list = data ?? [];
+        setScripts(list);
+        if (list.length > 0 && !scriptId) setScriptId(list[0].id);
+      })
+      .finally(() => setScriptsLoading(false));
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedScript = scripts.find((s) => s.id === scriptId) ?? null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!selectedScript) return;
     setError(null);
     setSaving(true);
     try {
@@ -105,8 +131,10 @@ function CreateSessionDialog({
         params: { path: { league_id: leagueId } },
         body: {
           name: name.trim(),
-          script_id: "00000000-0000-0000-0000-000000000000", // placeholder until script picker lands
-          mode,
+          script_id: selectedScript.id,
+          sport: selectedScript.sport,
+          season: selectedScript.season,
+          script_speed: scriptSpeed,
           max_teams: parseInt(maxTeams, 10),
         },
       });
@@ -144,8 +172,35 @@ function CreateSessionDialog({
           </div>
 
           <div className="space-y-1.5">
+            <Label>Season script</Label>
+            {scriptsLoading ? (
+              <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading scripts…
+              </div>
+            ) : scripts.length === 0 ? (
+              <p className="text-sm text-destructive">
+                No compiled scripts found. Run the ScriptCompiler first.
+              </p>
+            ) : (
+              <Select value={scriptId} onValueChange={setScriptId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {scripts.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {scriptLabel(s)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
             <Label>Script speed</Label>
-            <Select value={mode} onValueChange={setMode}>
+            <Select value={scriptSpeed} onValueChange={setScriptSpeed}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -175,7 +230,7 @@ function CreateSessionDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || saving}>
+            <Button type="submit" disabled={!name.trim() || !selectedScript || saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Create session
             </Button>
@@ -433,7 +488,7 @@ function SessionsTab({
               <div>
                 <p className="font-medium">{s.name}</p>
                 <p className="text-xs text-muted-foreground capitalize">
-                  {s.mode} · {s.sport} · {s.max_teams} teams
+                  {s.script_speed} · {s.sport} · {s.max_teams} teams
                 </p>
               </div>
               <SessionStatusBadge status={s.status} />

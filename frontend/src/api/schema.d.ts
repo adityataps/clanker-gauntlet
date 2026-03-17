@@ -494,18 +494,27 @@ export interface components {
     CreateSessionRequest: {
       name: string;
       script_id: string;
-      mode: string;
-      max_teams?: number;
+      sport: string;
+      season: number;
+      script_speed: string;
       waiver_mode?: string;
+      priority_reset?: string | null;
+      compression_factor?: number | null;
+      max_teams?: number;
+      scoring_config?: Record<string, unknown>;
     };
     SessionResponse: {
       id: string;
       name: string;
       sport: string;
+      season: number;
       status: string;
-      mode: string;
+      script_speed: string;
+      waiver_mode: string;
       max_teams: number;
       league_id: string | null;
+      owner_id: string;
+      team_id: string;
       created_at: string;
     };
     JoinSessionResponse: {
