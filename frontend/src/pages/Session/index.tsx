@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Play, Pause, WifiOff, Bot, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import {
+  ArrowLeft,
+  Play,
+  Pause,
+  WifiOff,
+  Bot,
+  User,
+  Loader2,
+  Lock,
+  Newspaper,
+  AlertTriangle,
+  Activity,
+  Trophy,
+  ArrowLeftRight,
+  RefreshCw,
+  Zap,
+  ChevronsDown,
+  Flag,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSessionWs, type SessionEvent } from "@/hooks/useSessionWs";
 import { api } from "@/api/client";
@@ -52,11 +69,47 @@ function eventLabel(type: string): string {
 const EVENT_COLOR: Record<string, string> = {
   WEEK_END: "text-yellow-400",
   WAIVER_RESOLVED: "text-sky-400",
+  WAIVER_OPEN: "text-sky-400/70",
   TRADE_RESOLVED: "text-violet-400",
+  TRADE_PROPOSED: "text-violet-400/70",
   INJURY_UPDATE: "text-red-400",
   AGENT_WINDOW_OPEN: "text-primary",
   SEASON_END: "text-yellow-300",
   ROSTER_LOCK: "text-amber-400",
+  GAME_START: "text-emerald-400",
+};
+
+// Left border accent per event category
+const EVENT_BORDER: Record<string, string> = {
+  WEEK_END: "border-l-yellow-400/50",
+  WAIVER_RESOLVED: "border-l-sky-400/60",
+  WAIVER_OPEN: "border-l-sky-400/30",
+  TRADE_RESOLVED: "border-l-violet-400/60",
+  TRADE_PROPOSED: "border-l-violet-400/30",
+  INJURY_UPDATE: "border-l-red-400/70",
+  AGENT_WINDOW_OPEN: "border-l-primary/60",
+  AGENT_WINDOW_CLOSE: "border-l-primary/20",
+  SEASON_END: "border-l-yellow-300/80",
+  ROSTER_LOCK: "border-l-amber-400/50",
+  GAME_START: "border-l-emerald-400/40",
+  NEWS_ITEM: "border-l-border/40",
+};
+
+// Small icon per event type
+const EVENT_ICON: Record<string, React.ReactNode> = {
+  ROSTER_LOCK: <Lock className="h-2.5 w-2.5" />,
+  NEWS_ITEM: <Newspaper className="h-2.5 w-2.5" />,
+  INJURY_UPDATE: <AlertTriangle className="h-2.5 w-2.5" />,
+  AGENT_WINDOW_OPEN: <Activity className="h-2.5 w-2.5" />,
+  AGENT_WINDOW_CLOSE: <Activity className="h-2.5 w-2.5" />,
+  GAME_START: <Zap className="h-2.5 w-2.5" />,
+  SCORE_UPDATE: <Activity className="h-2.5 w-2.5" />,
+  WAIVER_OPEN: <RefreshCw className="h-2.5 w-2.5" />,
+  WAIVER_RESOLVED: <RefreshCw className="h-2.5 w-2.5" />,
+  TRADE_PROPOSED: <ArrowLeftRight className="h-2.5 w-2.5" />,
+  TRADE_RESOLVED: <ArrowLeftRight className="h-2.5 w-2.5" />,
+  SEASON_END: <Trophy className="h-2.5 w-2.5" />,
+  connected: <Flag className="h-2.5 w-2.5" />,
 };
 
 function statusLabel(status: string, isRunning: boolean): { label: string; cls: string } {
@@ -145,68 +198,125 @@ function Scoreboard({ teams, week }: { teams: TeamScore[]; week: number }) {
   );
 }
 
+// ─── Event log sub-components ─────────────────────────────────────────────────
+
+function WeekDivider({ event }: { event: EventEntry }) {
+  const week = event.payload?.week as number | undefined;
+  return (
+    <div className="flex items-center gap-3 px-4 py-2">
+      <div className="h-px flex-1 bg-yellow-400/20" />
+      <span className="font-display text-[8px] font-bold uppercase tracking-[0.25em] text-yellow-400/60">
+        {week != null ? `Week ${week} end` : "Week end"}
+      </span>
+      <div className="h-px flex-1 bg-yellow-400/20" />
+    </div>
+  );
+}
+
+function EventRow({ event }: { event: EventEntry }) {
+  const borderCls = EVENT_BORDER[event.type] ?? "border-l-border/20";
+  const colorCls = EVENT_COLOR[event.type] ?? "text-foreground";
+  const icon = EVENT_ICON[event.type];
+
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-3 border-l-2 px-4 py-2 transition-colors hover:bg-accent/30",
+        borderCls
+      )}
+    >
+      <span className="mt-0.5 w-14 shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground/40">
+        {event.receivedAt.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })}
+      </span>
+      {icon && <span className={cn("mt-0.5 shrink-0", colorCls)}>{icon}</span>}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span
+            className={cn(
+              "font-display text-[10px] font-semibold uppercase tracking-wide",
+              colorCls
+            )}
+          >
+            {eventLabel(event.type)}
+          </span>
+          {event.seq !== undefined && (
+            <span className="font-mono text-[9px] text-muted-foreground/40">#{event.seq}</span>
+          )}
+        </div>
+        {event.payload?.description != null && (
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground/70">
+            {String(event.payload.description)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EventLog({ events }: { events: EventEntry[] }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
+    if (!autoScroll) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [events.length]);
+  }, [events.length, autoScroll]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-sm border border-border bg-card">
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <span className="font-display text-xs font-bold uppercase tracking-[0.15em] text-foreground">
           Event Log
         </span>
-        <span className="font-mono text-[10px] text-muted-foreground">{events.length} events</span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/60">
+            {events.length}
+          </span>
+          <button
+            onClick={() => setAutoScroll((v) => !v)}
+            className={cn(
+              "flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-display text-[9px] uppercase tracking-wider transition-colors",
+              autoScroll ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"
+            )}
+            title={autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
+          >
+            <ChevronsDown className="h-2.5 w-2.5" />
+            Auto
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Body */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {events.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="font-display text-xs uppercase tracking-wider text-muted-foreground">
-              Waiting for events…
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <div className="flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="h-1 w-1 rounded-full bg-primary/30 animate-pulse"
+                  style={{ animationDelay: `${i * 200}ms` }}
+                />
+              ))}
+            </div>
+            <p className="font-mono text-[10px] text-muted-foreground/40">waiting for events</p>
           </div>
         ) : (
-          <div className="space-y-0">
-            {events.map((ev) => (
-              <div
-                key={ev.id}
-                className="event-entry flex items-start gap-4 border-b border-border/40 py-2.5 last:border-0"
-              >
-                <span className="mt-px shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                  {ev.receivedAt.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                    hour12: false,
-                  })}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "font-display text-xs font-semibold uppercase tracking-wide",
-                        EVENT_COLOR[ev.type] ?? "text-foreground"
-                      )}
-                    >
-                      {eventLabel(ev.type)}
-                    </span>
-                    {ev.seq !== undefined && (
-                      <span className="font-mono text-[10px] text-muted-foreground/60">
-                        #{ev.seq}
-                      </span>
-                    )}
-                  </div>
-                  {ev.payload?.description != null && (
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {String(ev.payload.description)}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div>
+            {events.map((ev) =>
+              ev.type === "WEEK_END" ? (
+                <WeekDivider key={ev.id} event={ev} />
+              ) : (
+                <EventRow key={ev.id} event={ev} />
+              )
+            )}
             <div ref={bottomRef} />
           </div>
         )}
@@ -296,13 +406,19 @@ export function SessionPage() {
   const canPause = sessionDetail?.is_running;
   const status = sessionDetail ? statusLabel(sessionDetail.status, sessionDetail.is_running) : null;
 
+  // Progress ratio: seq cursor vs total compiled events
+  const progressPct =
+    sessionDetail && sessionDetail.script.total_events > 0
+      ? Math.min((sessionDetail.current_seq / sessionDetail.script.total_events) * 100, 100)
+      : 0;
+
   return (
     <div
       className="mx-auto flex max-w-screen-xl flex-col px-4 py-8"
       style={{ height: "calc(100vh - 48px)" }}
     >
       {/* Header */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
             className="flex items-center gap-1.5 font-display text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
@@ -322,34 +438,54 @@ export function SessionPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {canStart && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1.5 rounded-sm font-display text-xs font-bold uppercase tracking-wide"
-              onClick={handleStart}
+        <div className="flex items-center gap-2.5">
+          {/* Single play/pause transport toggle */}
+          {(canStart || canPause) && (
+            <button
+              onClick={canPause ? handlePause : handleStart}
               disabled={actionPending}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-sm border transition-all",
+                canPause
+                  ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 active:scale-95"
+                  : "border-border bg-card text-foreground hover:bg-accent active:scale-95"
+              )}
+              title={canPause ? "Pause session" : "Start session"}
             >
-              <Play className="h-3 w-3" />
-              Start
-            </Button>
-          )}
-          {canPause && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1.5 rounded-sm font-display text-xs font-bold uppercase tracking-wide"
-              onClick={handlePause}
-              disabled={actionPending}
-            >
-              <Pause className="h-3 w-3" />
-              Pause
-            </Button>
+              {actionPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : canPause ? (
+                <Pause className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5 translate-x-px" />
+              )}
+            </button>
           )}
           <LiveBadge isConnected={isConnected} />
         </div>
       </div>
+
+      {/* Progress bar — seq cursor through compiled script */}
+      {sessionDetail && sessionDetail.current_seq > 0 && (
+        <div className="mb-4 flex items-center gap-3">
+          <span className="w-12 shrink-0 font-display text-[9px] uppercase tracking-wider text-muted-foreground/60">
+            Wk {sessionDetail.current_week}
+          </span>
+          <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-border/60">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-700",
+                sessionDetail.is_running ? "bg-primary/60" : "bg-muted-foreground/40"
+              )}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <span className="w-20 shrink-0 text-right font-mono text-[9px] tabular-nums text-muted-foreground/40">
+            {sessionDetail.current_seq.toLocaleString()} /{" "}
+            {sessionDetail.script.total_events.toLocaleString()}
+          </span>
+        </div>
+      )}
 
       {/* Body — two-column */}
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_300px]">

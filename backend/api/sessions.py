@@ -360,3 +360,52 @@ async def pause_session(
     await db.refresh(session)
 
     return await _build_session_detail(session, db, runner_service)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /{session_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    runner_service: Annotated[EventRunnerService, Depends(get_runner_service)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete a session. Only the session owner or a league manager may do this.
+    Running sessions are paused first.
+    """
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    is_owner = session.owner_id == current_user.id
+
+    # Also allow the league manager to delete
+    is_league_manager = False
+    if session.league_id:
+        from backend.db.models import LeagueMembershipRole
+
+        lm = await db.scalar(
+            select(LeagueMembership).where(
+                LeagueMembership.league_id == session.league_id,
+                LeagueMembership.user_id == current_user.id,
+                LeagueMembership.status == LeagueMembershipStatus.ACTIVE,
+            )
+        )
+        is_league_manager = lm is not None and lm.role == LeagueMembershipRole.MANAGER
+
+    if not is_owner and not is_league_manager:
+        raise HTTPException(
+            status_code=403, detail="Only the session owner or league manager can delete it"
+        )
+
+    # Stop runner if active
+    if runner_service.is_running(session_id):
+        await runner_service.pause(session_id)
+
+    await db.delete(session)
+    await db.commit()

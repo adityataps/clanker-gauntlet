@@ -372,6 +372,10 @@ export interface paths {
         200: { content: { "application/json": components["schemas"]["SessionDetailResponse"] } };
       };
     };
+    delete: {
+      parameters: { path: { session_id: string } };
+      responses: { 204: { content: never } };
+    };
   };
   "/sessions/{session_id}/start": {
     post: {
@@ -559,6 +563,7 @@ export interface components {
       team_id?: string | null;
       created_at: string;
       current_teams: number;
+      current_week: number;
     };
     JoinSessionResponse: {
       session_id: string;
@@ -598,6 +603,8 @@ export interface components {
       season: number;
       season_type: string;
       total_events: number;
+      /** MAX(sim_offset_hours) for this script — use to compute compression_factor */
+      total_sim_hours: number;
       status: string;
       compiled_at: string | null;
     };

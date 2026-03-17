@@ -148,6 +148,8 @@ class EventRunnerService:
             )
             runner._waiver_mode = session_row.waiver_mode
             runner._priority_reset = session_row.priority_reset
+            runner._compression_factor = session_row.compression_factor
+            runner._wall_start_time = session_row.wall_start_time
 
             try:
                 await runner.run()

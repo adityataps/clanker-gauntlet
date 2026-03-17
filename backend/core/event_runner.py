@@ -8,31 +8,39 @@ the runner resolves all intentions atomically.
 Architecture:
     - One EventRunner instance per active session, managed by EventRunnerService.
     - Maintains a WorldState in memory; serializes to DB at week boundaries.
-    - script_speed is read from the Session DB row — not a constructor arg.
+    - script_speed, compression_factor, and wall_start_time are read from the
+      Session DB row — not constructor args.
 
 Script speeds:
-    INSTANT     Tight async loop, no waiting for agents. All intermediate
+    BLITZ       Compressed wall-clock playback; does NOT wait for agents at
+                AGENT_WINDOW_OPEN. Events are paced according to compression_factor
+                (sim_offset_hours / compression_factor = wall delay). Intermediate
                 context events (news, injuries) are pre-loaded via a lookahead
-                query at AGENT_WINDOW_OPEN (script is immutable, so we know
-                what's coming before agents start reasoning).
+                query so agents see them immediately.
 
-    COMPRESSED  Compressed wall-clock advancement (APScheduler — Phase 2+).
-                Blocks at each agent window: AGENT_WINDOW_CLOSE / WAIVER_RESOLVED
-                waits for all teams to submit before the runner advances.
-                Good for league-with-friends play without a 17-week commitment.
+    MANAGED     Same compressed wall-clock pacing as BLITZ. Blocks at each agent
+                window until all teams submit (or timeout). Good for league play
+                with real humans.
 
-    REALTIME    1:1 wall-clock. No blocking at agent windows — deadlines are
-                real timestamps. Uses a live feed: intermediate events are
-                appended to a shared list that agent tool calls read dynamically.
+    IMMERSIVE   1:1 wall-clock (compression_factor = 1). No blocking at agent
+                windows — deadlines are real timestamps.
+
+Timing:
+    Each event's target wall-clock time is:
+        wall_time = wall_start_time + timedelta(hours=sim_offset_hours / compression_factor)
+
+    The runner sleeps until wall_time before processing the event. If the runner
+    is resuming mid-session (cursor > 0), events whose wall_time is already in
+    the past are processed immediately (delay clamped to 0).
 
 Context injection:
     All three modes use the same mechanism under the hood — a shared mutable
     list that ctx.recent_news points to. The difference is in how it's populated:
 
-    INSTANT     Pre-populated via lookahead query before tasks launch.
+    BLITZ       Pre-populated via lookahead query before tasks launch.
                 Agents see all window events from the start of their loop.
 
-    COMPRESSED  / REALTIME
+    MANAGED / IMMERSIVE
                 Starts empty (or with recent news). The runner appends to the
                 list as NEWS_ITEM / INJURY_UPDATE events arrive. Agents pick up
                 new items on subsequent tool calls (get_recent_news returns the
@@ -146,6 +154,14 @@ class EventRunner:
         self._priority_reset: str | None = None  # only relevant for PRIORITY mode
         self._redis = redis
 
+        # Compression timing — set by EventRunnerService from the Session row.
+        # compression_factor: sim_hours per wall_hour (e.g. 2856 → 1 h/season).
+        # wall_start_time: when the session was first started (UTC).
+        # When both are set, the runner sleeps between events to pace delivery.
+        # When None (legacy / tests), events fire as fast as possible.
+        self._compression_factor: int | None = None
+        self._wall_start_time: datetime | None = None
+
         # Cursor — loaded from DB in run()
         self._current_seq: int = 0
 
@@ -192,6 +208,7 @@ class EventRunner:
                 break
 
             for event in events:
+                await self._pace_event(event)
                 await self._process_event(event)
                 self._current_seq = event.seq + 1
                 await self._persist_cursor(self._current_seq)
@@ -199,6 +216,32 @@ class EventRunner:
                 if event.event_type == "SEASON_END":
                     logger.info("EventRunner: SEASON_END reached for session=%s", self._session_id)
                     return
+
+    # ------------------------------------------------------------------
+    # Timing / pacing
+    # ------------------------------------------------------------------
+
+    async def _pace_event(self, event: SeasonEvent) -> None:
+        """
+        Sleep until this event's wall-clock target time before processing.
+
+        wall_time = wall_start_time + timedelta(hours=sim_offset_hours / compression_factor)
+
+        If the target is already in the past (e.g. runner resumed mid-session after
+        a pause), the delay is clamped to 0 and the event fires immediately.
+        If compression_factor or wall_start_time is not set, this is a no-op.
+        """
+        if self._compression_factor is None or self._wall_start_time is None:
+            return
+
+        from datetime import timedelta
+
+        target = self._wall_start_time + timedelta(
+            hours=event.sim_offset_hours / self._compression_factor
+        )
+        delay = (target - datetime.now(UTC)).total_seconds()
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     # ------------------------------------------------------------------
     # Event dispatch

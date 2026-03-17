@@ -17,7 +17,8 @@ import {
   Save,
   Trash2,
   Settings,
-  ChevronRight,
+  Play,
+  Pause,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -159,6 +160,7 @@ function SessionTooltip({ session, x, y }: { session: Session; x: number; y: num
         />
         <Row label="Waiver" value={session.waiver_mode} />
         <Row label="Teams" value={`${session.current_teams} / ${session.max_teams}`} />
+        {session.current_week > 0 && <Row label="Week" value={`${session.current_week}`} />}
         <Row label="Status" value={STATUS_LABEL[session.status.toLowerCase()] ?? session.status} />
       </div>
     </div>,
@@ -187,13 +189,50 @@ function SessionSidebarItem({ session, leagueId }: { session: Session; leagueId:
       >
         <StatusDot status={session.status} />
         <span className="flex-1 truncate font-medium">{session.name}</span>
-        <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
-          {SPEED_EMOJI[session.script_speed] ?? ""}{" "}
-          {STATUS_LABEL[session.status.toLowerCase()] ?? session.status}
+        <span className="font-display text-[8px] tracking-wider text-muted-foreground/50">
+          {SPEED_EMOJI[session.script_speed] ?? ""}
         </span>
       </Link>
       {pos && <SessionTooltip session={session} x={pos.x} y={pos.y} />}
     </div>
+  );
+}
+
+// ─── Confirm delete dialog ────────────────────────────────────────────────────
+
+function ConfirmDeleteDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  onConfirm,
+  deleting,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  title: string;
+  description: string;
+  onConfirm: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={deleting}>
+            {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -206,6 +245,21 @@ function scriptLabel(s: ScriptOption) {
 }
 
 // ─── Create session dialog ────────────────────────────────────────────────────
+
+// Duration presets: label → wall-clock hours for the full season
+const DURATION_PRESETS = [
+  { label: "15 min", hours: 0.25 },
+  { label: "30 min", hours: 0.5 },
+  { label: "1 hour", hours: 1 },
+  { label: "2 hours", hours: 2 },
+  { label: "4 hours", hours: 4 },
+] as const;
+
+const DEFAULT_DURATION_HOURS = 1;
+
+function compressionFactor(totalSimHours: number, wallHours: number): number {
+  return Math.ceil(totalSimHours / wallHours);
+}
 
 function CreateSessionDialog({
   leagueId,
@@ -220,6 +274,7 @@ function CreateSessionDialog({
 }) {
   const [name, setName] = useState("");
   const [scriptSpeed, setScriptSpeed] = useState("blitz");
+  const [durationHours, setDurationHours] = useState(DEFAULT_DURATION_HOURS);
   const [maxTeams, setMaxTeams] = useState("10");
   const [scripts, setScripts] = useState<ScriptOption[]>([]);
   const [scriptId, setScriptId] = useState("");
@@ -241,6 +296,13 @@ function CreateSessionDialog({
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedScript = scripts.find((s) => s.id === scriptId) ?? null;
+  const isImmersive = scriptSpeed === "immersive";
+
+  // Derived: compression_factor to send to the API
+  const derivedCompressionFactor =
+    isImmersive || !selectedScript
+      ? null
+      : compressionFactor(selectedScript.total_sim_hours, durationHours);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -257,6 +319,7 @@ function CreateSessionDialog({
           season: selectedScript.season,
           script_speed: scriptSpeed,
           max_teams: parseInt(maxTeams, 10),
+          compression_factor: derivedCompressionFactor,
         },
       });
       if (apiError || !data) throw new Error("Failed to create session");
@@ -319,19 +382,57 @@ function CreateSessionDialog({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Script speed</Label>
-            <Select value={scriptSpeed} onValueChange={setScriptSpeed}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="blitz">⚡ Blitz — as fast as possible</SelectItem>
-                <SelectItem value="managed">⏱️ Managed — compressed wall-clock</SelectItem>
-                <SelectItem value="immersive">🐌 Immersive — 1:1 real time</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Speed + Duration — side by side */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Mode</Label>
+              <Select value={scriptSpeed} onValueChange={setScriptSpeed}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="blitz">⚡ Blitz</SelectItem>
+                  <SelectItem value="managed">⏱️ Managed</SelectItem>
+                  <SelectItem value="immersive">🐌 Immersive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>
+                Season duration
+                {isImmersive && (
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">(real time)</span>
+                )}
+              </Label>
+              <Select
+                value={String(durationHours)}
+                onValueChange={(v) => setDurationHours(Number(v))}
+                disabled={isImmersive}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DURATION_PRESETS.map((p) => (
+                    <SelectItem key={p.hours} value={String(p.hours)}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          {/* Compression factor hint */}
+          {derivedCompressionFactor != null && (
+            <p className="text-[11px] text-muted-foreground">
+              Compression:{" "}
+              <span className="font-mono">{derivedCompressionFactor.toLocaleString()}×</span>
+              {" — "}each simulated week plays in ~
+              <span className="font-mono">{((durationHours * 60) / 17).toFixed(1)} min</span>
+            </p>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="max-teams">Max teams</Label>
@@ -645,13 +746,17 @@ function LeagueApiKeyRow({
 function SettingsPanel({
   league,
   onLeagueUpdated,
+  onLeagueDeleted,
 }: {
   league: League;
   onLeagueUpdated: (updated: Partial<League>) => void;
+  onLeagueDeleted: () => void;
 }) {
   const [hasKeys, setHasKeys] = useState<Record<string, boolean>>(league.has_league_keys ?? {});
   const [allowSharedKey, setAllowSharedKey] = useState(league.allow_shared_key);
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function handleToggleSharedKey(enabled: boolean) {
     setAllowSharedKey(enabled);
@@ -672,6 +777,18 @@ function SettingsPanel({
       params: { path: { league_id: league.id } },
     });
     if (data) setHasKeys(data.has_keys);
+  }
+
+  async function handleDeleteLeague() {
+    setDeleting(true);
+    try {
+      await api.DELETE("/leagues/{league_id}", {
+        params: { path: { league_id: league.id } },
+      });
+      onLeagueDeleted();
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -714,6 +831,34 @@ function SettingsPanel({
           ))}
         </div>
       )}
+
+      {/* Danger zone */}
+      <div className="space-y-3 rounded-sm border border-destructive/30 p-4">
+        <div>
+          <p className="text-sm font-medium text-destructive">Danger zone</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Permanently delete this league, all its sessions, and all member data.
+          </p>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="rounded-sm font-display text-xs uppercase tracking-wide"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          Delete league
+        </Button>
+      </div>
+
+      <ConfirmDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete league"
+        description={`Delete "${league.name}"? All sessions, members, and data will be permanently removed.`}
+        onConfirm={handleDeleteLeague}
+        deleting={deleting}
+      />
     </div>
   );
 }
@@ -725,12 +870,62 @@ function SessionsPanel({
   sessions,
   onNewSession,
   canCreate,
+  isManager,
+  onSessionDeleted,
+  onSessionUpdated,
 }: {
   league: League;
   sessions: Session[];
   onNewSession: () => void;
   canCreate: boolean;
+  isManager: boolean;
+  onSessionDeleted: (id: string) => void;
+  onSessionUpdated: (id: string, patch: Partial<Session>) => void;
 }) {
+  const { user } = useAuthStore();
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // Track which session is currently mid-start/pause to show a spinner
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.DELETE("/sessions/{session_id}", {
+        params: { path: { session_id: deleteTarget.id } },
+      });
+      onSessionDeleted(deleteTarget.id);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleStart(sessionId: string) {
+    setPendingId(sessionId);
+    try {
+      const { data } = await api.POST("/sessions/{session_id}/start", {
+        params: { path: { session_id: sessionId } },
+      });
+      if (data) onSessionUpdated(sessionId, { status: data.status });
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function handlePause(sessionId: string) {
+    setPendingId(sessionId);
+    try {
+      const { data } = await api.POST("/sessions/{session_id}/pause", {
+        params: { path: { session_id: sessionId } },
+      });
+      if (data) onSessionUpdated(sessionId, { status: data.status });
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -769,30 +964,99 @@ function SessionsPanel({
         </div>
       ) : (
         <div className="space-y-2">
-          {sessions.map((s) => (
-            <Link
-              key={s.id}
-              to={`/leagues/${league.id}/sessions/${s.id}`}
-              className="group flex items-center justify-between rounded-sm border border-border bg-card px-4 py-3 transition-all hover:border-primary/30 hover:bg-accent"
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <StatusDot status={s.status} />
-                  <p className="font-medium">{s.name}</p>
+          {sessions.map((s) => {
+            const isOwner = s.owner_id === user?.id;
+            const canPlay = isOwner && (s.status === "draft_pending" || s.status === "paused");
+            const canPause = isOwner && s.status === "in_progress";
+            const isPending = pendingId === s.id;
+
+            return (
+              <div
+                key={s.id}
+                className="group flex items-center rounded-sm border border-border bg-card transition-all hover:border-primary/30 hover:bg-accent"
+              >
+                {/* Left — name + metadata; the navigable region */}
+                <Link
+                  to={`/leagues/${league.id}/sessions/${s.id}`}
+                  className="min-w-0 flex-1 px-4 py-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={s.status} />
+                    <p className="truncate font-medium">{s.name}</p>
+                  </div>
+                  <p className="mt-0.5 pl-4 font-mono text-[10px] text-muted-foreground">
+                    {SPEED_EMOJI[s.script_speed] ?? ""} {s.script_speed.toUpperCase()} ·{" "}
+                    {s.sport.toUpperCase()} {s.season} · {s.current_teams}/{s.max_teams} teams
+                    {s.current_week > 0 && ` · Wk ${s.current_week}`}
+                  </p>
+                </Link>
+
+                {/* Right — controls; not inside Link to avoid nested interactives */}
+                <div className="flex shrink-0 items-center gap-2 pr-3">
+                  {/* Status chip */}
+                  <SessionStatusBadge status={s.status} />
+
+                  {/* Play / Pause — right of chip */}
+                  {(canPlay || canPause) && (
+                    <button
+                      onClick={() => (canPause ? handlePause(s.id) : handleStart(s.id))}
+                      disabled={isPending}
+                      title={canPause ? "Pause session" : "Start session"}
+                      className={cn(
+                        "flex h-6 w-6 items-center justify-center rounded-sm border transition-all",
+                        canPause
+                          ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
+                          : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                      )}
+                    >
+                      {isPending ? (
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      ) : canPause ? (
+                        <Pause className="h-2.5 w-2.5" />
+                      ) : (
+                        <Play className="h-2.5 w-2.5 translate-x-px" />
+                      )}
+                    </button>
+                  )}
+
+                  {/* Kebab — manager actions */}
+                  {isManager && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-sm opacity-0 transition-opacity group-hover:opacity-100"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteTarget(s)}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          Delete session
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
-                <p className="mt-0.5 pl-4 font-mono text-[10px] text-muted-foreground">
-                  {SPEED_EMOJI[s.script_speed] ?? ""} {s.script_speed.toUpperCase()} ·{" "}
-                  {s.sport.toUpperCase()} {s.season} · {s.current_teams}/{s.max_teams} teams
-                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <SessionStatusBadge status={s.status} />
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-              </div>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => !v && setDeleteTarget(null)}
+        title="Delete session"
+        description={`Delete "${deleteTarget?.name}"? This is permanent and cannot be undone.`}
+        onConfirm={handleDelete}
+        deleting={deleting}
+      />
     </div>
   );
 }
@@ -910,10 +1174,58 @@ export function LeaguePage() {
               )}
             </div>
           ) : (
-            <div className="space-y-0.5">
-              {sessions.map((s) => (
-                <SessionSidebarItem key={s.id} session={s} leagueId={league.id} />
-              ))}
+            <div className="space-y-3">
+              {(
+                [
+                  {
+                    key: "live",
+                    label: "Live",
+                    items: sessions.filter(
+                      (s) => s.status === "in_progress" && s.script_speed === "immersive"
+                    ),
+                  },
+                  {
+                    key: "running",
+                    label: "In Progress",
+                    items: sessions.filter(
+                      (s) => s.status === "in_progress" && s.script_speed !== "immersive"
+                    ),
+                  },
+                  {
+                    key: "paused",
+                    label: "Paused",
+                    items: sessions.filter((s) => s.status === "paused"),
+                  },
+                  {
+                    key: "setup",
+                    label: "Setup",
+                    items: sessions.filter(
+                      (s) => s.status === "draft_pending" || s.status === "draft_in_progress"
+                    ),
+                  },
+                  {
+                    key: "done",
+                    label: "Done",
+                    items: sessions.filter((s) => s.status === "completed"),
+                  },
+                ] as const
+              )
+                .filter((g) => g.items.length > 0)
+                .map((group) => (
+                  <div key={group.key}>
+                    <div className="mb-0.5 flex items-center gap-1.5 px-2">
+                      <span className="font-display text-[8px] uppercase tracking-[0.2em] text-muted-foreground/50">
+                        {group.label}
+                      </span>
+                      <div className="h-px flex-1 bg-border/40" />
+                    </div>
+                    <div className="space-y-0.5">
+                      {group.items.map((s) => (
+                        <SessionSidebarItem key={s.id} session={s} leagueId={league.id} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
             </div>
           )}
         </div>
@@ -993,6 +1305,11 @@ export function LeaguePage() {
             sessions={sessions}
             onNewSession={() => setCreateOpen(true)}
             canCreate={canCreate}
+            isManager={isManager}
+            onSessionDeleted={(id) => setSessions((prev) => prev.filter((s) => s.id !== id))}
+            onSessionUpdated={(id, patch) =>
+              setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+            }
           />
         )}
         {activeView === "members" && (
@@ -1016,6 +1333,7 @@ export function LeaguePage() {
             onLeagueUpdated={(updated) =>
               setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
             }
+            onLeagueDeleted={() => navigate("/dashboard")}
           />
         )}
       </main>

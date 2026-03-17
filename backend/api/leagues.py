@@ -22,6 +22,7 @@ from backend.db.models import (
     MembershipRole,
     PriorityReset,
     ScriptSpeed,
+    SeasonEvent,
     Session,
     SessionCreationPolicy,
     SessionMembership,
@@ -145,6 +146,7 @@ class SessionResponse(BaseModel):
     owner_id: uuid.UUID
     team_id: uuid.UUID | None = None  # set on create; None when listing
     current_teams: int = 0  # populated by list endpoints
+    current_week: int = 0  # populated by list endpoints via correlated subquery
 
     model_config = {"from_attributes": True}
 
@@ -684,8 +686,24 @@ async def list_sessions(
     """List all sessions belonging to this league, newest first."""
     await _require_active_member(league_id, current_user.id, db)
 
+    week_subq = (
+        select(SeasonEvent.week_number)
+        .where(
+            SeasonEvent.script_id == Session.script_id,
+            SeasonEvent.seq < Session.current_seq,
+        )
+        .order_by(SeasonEvent.seq.desc())
+        .limit(1)
+        .correlate(Session)
+        .scalar_subquery()
+    )
+
     result = await db.execute(
-        select(Session, func.count(Team.id).label("team_count"))
+        select(
+            Session,
+            func.count(Team.id).label("team_count"),
+            func.coalesce(week_subq, 0).label("current_week"),
+        )
         .outerjoin(Team, Team.session_id == Session.id)
         .where(Session.league_id == league_id)
         .group_by(Session.id)
@@ -705,8 +723,9 @@ async def list_sessions(
             league_id=s.league_id,
             owner_id=s.owner_id,
             current_teams=team_count,
+            current_week=current_week,
         )
-        for s, team_count in rows
+        for s, team_count, current_week in rows
     ]
 
 
