@@ -9,10 +9,11 @@ import { useAuthStore } from "@/store/authStore";
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, isLoading } = useAuthStore();
+  const login = useAuthStore((s) => s.login);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? "/dashboard";
@@ -20,11 +21,14 @@ export function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
     try {
       await login(email, password);
       navigate(from, { replace: true });
     } catch {
       setError("Invalid email or password.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -64,8 +68,8 @@ export function LoginPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Signing in…" : "Sign in"}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
 

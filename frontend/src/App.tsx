@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/layouts/AppShell";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -10,9 +11,16 @@ import { LeaguePage } from "@/pages/League";
 import { SessionPage } from "@/pages/Session";
 import { JoinLeaguePage } from "@/pages/JoinLeague";
 import { LineupPage } from "@/pages/Lineup";
+import { useAuthStore } from "@/store/authStore";
 import { NotFoundPage } from "@/pages/NotFound";
 
 export default function App() {
+  const initAuth = useAuthStore((s) => s.initAuth);
+
+  useEffect(() => {
+    initAuth();
+  }, [initAuth]);
+
   return (
     <BrowserRouter>
       <Routes>

@@ -42,4 +42,15 @@ api.use({
     }
     return request;
   },
+  onResponse({ response }) {
+    if (response.status === 401) {
+      clearToken();
+      // Let the Zustand store (and ProtectedRoute) react via the token change.
+      // Import is deferred to avoid circular deps at module load time.
+      import("@/store/authStore").then(({ useAuthStore }) => {
+        useAuthStore.setState({ user: null, token: null });
+      });
+    }
+    return response;
+  },
 });

@@ -8,21 +8,25 @@ import { useAuthStore } from "@/store/authStore";
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const { register, isLoading } = useAuthStore();
+  const register = useAuthStore((s) => s.register);
 
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
     try {
       await register(email, password, displayName);
       navigate("/dashboard", { replace: true });
     } catch {
       setError("Registration failed. That email may already be in use.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -75,8 +79,8 @@ export function RegisterPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Creating account…" : "Create account"}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? "Creating account…" : "Create account"}
           </Button>
         </form>
 
