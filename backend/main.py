@@ -18,6 +18,7 @@ from backend.auth.router import router as auth_router
 from backend.config import settings
 from backend.core.runner_service import EventRunnerService
 from backend.db.session import AsyncSessionLocal
+from backend.worker import broker
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ────────────────────────────────────────────────────────────
+    await broker.startup()
     redis = AsyncRedis.from_url(settings.redis_url, decode_responses=True)
     app.state.redis = redis
     app.state.runner_service = EventRunnerService(AsyncSessionLocal, redis=redis)
     logger.info("Redis connected; EventRunnerService ready")
     yield
     # ── Shutdown ───────────────────────────────────────────────────────────
+    await broker.shutdown()
     await redis.aclose()
     logger.info("Redis connection closed")
 

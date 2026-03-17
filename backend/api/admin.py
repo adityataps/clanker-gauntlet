@@ -1,8 +1,7 @@
 """Admin API — server-admin only endpoints."""
 
-import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +21,7 @@ from backend.db.models import (
     User,
 )
 from backend.db.session import get_db
+from backend.worker import compile_script_task
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -90,36 +90,6 @@ class CompileResponse(BaseModel):
     script_id: uuid.UUID
     status: str
     message: str
-
-
-# ── Compile background task ───────────────────────────────────────────────────
-
-
-async def _run_compile(script_id: uuid.UUID, sport: str, season: int, season_type: str) -> None:
-    """Background coroutine: compiles into the already-created pending SeasonScript."""
-    from backend.data.compiler import ScriptCompiler
-    from backend.db.session import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(SeasonScript).where(SeasonScript.id == script_id))
-        script = result.scalar_one_or_none()
-        if script is None:
-            return
-        compiler = ScriptCompiler(db)
-        try:
-            total = await compiler._compile_nfl(script)
-            script.status = ScriptStatus.COMPILED
-            script.total_events = total
-            script.compiled_at = datetime.now(UTC)
-            await db.commit()
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).exception(
-                "Admin compile failed for %s %s %s", sport, season, season_type
-            )
-            script.status = ScriptStatus.FAILED
-            await db.commit()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -236,7 +206,12 @@ async def compile_script(
     await db.commit()
     await db.refresh(new_script)
 
-    asyncio.create_task(_run_compile(new_script.id, body.sport, body.season, body.season_type))
+    await compile_script_task.kiq(
+        script_id=str(new_script.id),
+        sport=body.sport,
+        season=body.season,
+        season_type=body.season_type,
+    )
 
     return CompileResponse(
         script_id=new_script.id,

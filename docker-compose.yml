@@ -27,6 +27,20 @@ services:
       timeout: 5s
       retries: 5
 
+# ── Worker (optional, for containerised dev) ──────────────────────────────────
+# Uncomment when you have a Dockerfile. For local dev, run the worker directly:
+#   taskiq worker backend.worker:broker
+#
+#  worker:
+#    build: .
+#    command: taskiq worker backend.worker:broker
+#    env_file: .env
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      redis:
+#        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
