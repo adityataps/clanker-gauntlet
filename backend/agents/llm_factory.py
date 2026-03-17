@@ -73,7 +73,7 @@ class AgentClient:
 
 
 async def build_llm_client_for_agent(
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     league_id: uuid.UUID | None,
     provider: str,
     reasoning_depth: str = "standard",

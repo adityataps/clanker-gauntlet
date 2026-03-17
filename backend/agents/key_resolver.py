@@ -43,7 +43,7 @@ SYSTEM_TIER_MODELS: dict[str, str] = {
 
 
 async def resolve_api_key(
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     league_id: uuid.UUID | None,
     provider: str,
     db: AsyncSession,
@@ -51,17 +51,21 @@ async def resolve_api_key(
     """
     Return (plaintext_api_key, tier) for the given user/league/provider.
 
+    user_id may be None for agent-only teams with no associated user account
+    (system-managed agents). Tier 1 is skipped in that case.
+
     Raises ValueError if no key is available at any tier.
     """
     # ── Tier 1: user key ──────────────────────────────────────────────────────
-    user_row = await db.scalar(
-        select(UserApiKey).where(
-            UserApiKey.user_id == user_id,
-            UserApiKey.provider == provider,
+    if user_id is not None:
+        user_row = await db.scalar(
+            select(UserApiKey).where(
+                UserApiKey.user_id == user_id,
+                UserApiKey.provider == provider,
+            )
         )
-    )
-    if user_row is not None:
-        return decrypt_api_key(user_row.encrypted_key), "user"
+        if user_row is not None:
+            return decrypt_api_key(user_row.encrypted_key), "user"
 
     # ── Tier 2: league key ────────────────────────────────────────────────────
     if league_id is not None:

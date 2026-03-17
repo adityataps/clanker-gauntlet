@@ -340,6 +340,45 @@ export interface paths {
       responses: { 204: { content: never } };
     };
   };
+  "/scripts": {
+    get: {
+      responses: {
+        200: { content: { "application/json": components["schemas"]["ScriptResponse"][] } };
+      };
+    };
+  };
+  "/scripts/{script_id}": {
+    get: {
+      parameters: { path: { script_id: string } };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["ScriptResponse"] } };
+      };
+    };
+  };
+  "/sessions/{session_id}": {
+    get: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["SessionDetailResponse"] } };
+      };
+    };
+  };
+  "/sessions/{session_id}/start": {
+    post: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["SessionDetailResponse"] } };
+      };
+    };
+  };
+  "/sessions/{session_id}/pause": {
+    post: {
+      parameters: { path: { session_id: string } };
+      responses: {
+        200: { content: { "application/json": components["schemas"]["SessionDetailResponse"] } };
+      };
+    };
+  };
   "/sessions/{session_id}/lineup": {
     get: {
       parameters: { path: { session_id: string } };
@@ -500,6 +539,44 @@ export interface components {
       id: string;
       email: string;
       display_name: string;
+    };
+    ScriptResponse: {
+      id: string;
+      sport: string;
+      season: number;
+      season_type: string;
+      total_events: number;
+      status: string;
+      compiled_at: string | null;
+    };
+    TeamSummary: {
+      id: string;
+      name: string;
+      type: string;
+      faab_balance: number;
+    };
+    ScriptSummary: {
+      id: string;
+      sport: string;
+      season: number;
+      season_type: string;
+      total_events: number;
+    };
+    SessionDetailResponse: {
+      id: string;
+      name: string;
+      sport: string;
+      season: number;
+      status: string;
+      script_speed: string;
+      waiver_mode: string;
+      current_seq: number;
+      current_week: number;
+      is_running: boolean;
+      script: components["schemas"]["ScriptSummary"];
+      teams: components["schemas"]["TeamSummary"][];
+      league_id: string | null;
+      created_at: string;
     };
     RosterPlayer: {
       player_id: string;

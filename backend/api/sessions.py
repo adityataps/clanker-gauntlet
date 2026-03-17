@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,11 +7,16 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api.deps import get_runner_service
 from backend.auth.dependencies import get_current_user
+from backend.core.runner_service import EventRunnerService
+from backend.core.team_factory import load_teams_for_session
 from backend.db.models import (
     LeagueMembership,
     LeagueMembershipStatus,
     MembershipRole,
+    SeasonEvent,
+    SeasonScript,
     Session,
     SessionMembership,
     SessionStatus,
@@ -144,3 +150,213 @@ async def leave_session(
                 team.config = _BOT_CONFIG
 
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
+
+class TeamSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    type: str
+    faab_balance: int
+
+
+class ScriptSummary(BaseModel):
+    id: uuid.UUID
+    sport: str
+    season: int
+    season_type: str
+    total_events: int
+
+
+class SessionDetailResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    sport: str
+    season: int
+    status: str
+    script_speed: str
+    waiver_mode: str
+    current_seq: int
+    current_week: int
+    is_running: bool
+    script: ScriptSummary
+    teams: list[TeamSummary]
+    league_id: uuid.UUID | None
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _build_session_detail(
+    session: Session,
+    db: AsyncSession,
+    runner_service: EventRunnerService,
+) -> SessionDetailResponse:
+    script = await db.get(SeasonScript, session.script_id)
+    if script is None:
+        raise HTTPException(status_code=500, detail="Session references a missing script")
+
+    teams_result = await db.execute(select(Team).where(Team.session_id == session.id))
+    teams = teams_result.scalars().all()
+
+    # Determine current week from the nearest event before the cursor
+    current_week = 1
+    if session.current_seq > 0:
+        week_row = await db.scalar(
+            select(SeasonEvent.week_number)
+            .where(
+                SeasonEvent.script_id == session.script_id,
+                SeasonEvent.seq < session.current_seq,
+            )
+            .order_by(SeasonEvent.seq.desc())
+            .limit(1)
+        )
+        if week_row is not None:
+            current_week = week_row
+
+    return SessionDetailResponse(
+        id=session.id,
+        name=session.name,
+        sport=session.sport,
+        season=session.season,
+        status=session.status,
+        script_speed=session.script_speed,
+        waiver_mode=session.waiver_mode,
+        current_seq=session.current_seq,
+        current_week=current_week,
+        is_running=runner_service.is_running(session.id),
+        script=ScriptSummary(
+            id=script.id,
+            sport=script.sport,
+            season=script.season,
+            season_type=script.season_type,
+            total_events=script.total_events,
+        ),
+        teams=[
+            TeamSummary(id=t.id, name=t.name, type=t.type, faab_balance=t.faab_balance)
+            for t in teams
+        ],
+        league_id=session.league_id,
+        created_at=session.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /{session_id}
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{session_id}", response_model=SessionDetailResponse)
+async def get_session(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    runner_service: Annotated[EventRunnerService, Depends(get_runner_service)],
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Must be a member or observer
+    sm = await db.scalar(
+        select(SessionMembership).where(
+            SessionMembership.session_id == session_id,
+            SessionMembership.user_id == current_user.id,
+        )
+    )
+    if sm is None:
+        raise HTTPException(status_code=403, detail="Not a member of this session")
+
+    return await _build_session_detail(session, db, runner_service)
+
+
+# ---------------------------------------------------------------------------
+# POST /{session_id}/start
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/start", response_model=SessionDetailResponse)
+async def start_session(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    runner_service: Annotated[EventRunnerService, Depends(get_runner_service)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start (or resume) the EventRunner for a session.
+
+    Allowed statuses: DRAFT_PENDING, PAUSED, IN_PROGRESS (idempotent resume).
+    Only the session owner may start it.
+    """
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the session owner can start it")
+
+    if session.status == SessionStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Session is already completed")
+
+    # Already running — idempotent
+    if runner_service.is_running(session_id):
+        return await _build_session_detail(session, db, runner_service)
+
+    # Load teams
+    teams = await load_teams_for_session(session_id, session.league_id, db)
+    if not teams:
+        raise HTTPException(
+            status_code=409,
+            detail="Session has no teams with resolvable API keys — cannot start",
+        )
+
+    # Transition status
+    if session.status != SessionStatus.IN_PROGRESS:
+        session.status = SessionStatus.IN_PROGRESS
+        if session.wall_start_time is None:
+            session.wall_start_time = datetime.now(UTC)
+        await db.commit()
+        await db.refresh(session)
+
+    await runner_service.start(session_id, teams)
+
+    return await _build_session_detail(session, db, runner_service)
+
+
+# ---------------------------------------------------------------------------
+# POST /{session_id}/pause
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/pause", response_model=SessionDetailResponse)
+async def pause_session(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    runner_service: Annotated[EventRunnerService, Depends(get_runner_service)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause a running session. Only the owner may pause it."""
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the session owner can pause it")
+
+    if not runner_service.is_running(session_id):
+        raise HTTPException(status_code=409, detail="Session is not currently running")
+
+    await runner_service.pause(session_id)
+
+    session.status = SessionStatus.PAUSED
+    await db.commit()
+    await db.refresh(session)
+
+    return await _build_session_detail(session, db, runner_service)

@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api.health import router as health_router
 from backend.api.leagues import router as leagues_router
+from backend.api.scripts import router as scripts_router
 from backend.api.sessions import router as sessions_router
 from backend.api.trades import router as trades_router
 from backend.api.users import router as users_router
@@ -52,6 +53,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(scripts_router)
 app.include_router(auth_router)
 app.include_router(leagues_router)
 app.include_router(users_router)
