@@ -140,7 +140,7 @@ class SessionResponse(BaseModel):
     max_teams: int
     league_id: uuid.UUID | None
     owner_id: uuid.UUID
-    team_id: uuid.UUID  # the creator's team
+    team_id: uuid.UUID | None = None  # set on create; None when listing
 
     model_config = {"from_attributes": True}
 
@@ -636,6 +636,36 @@ async def create_session(
         owner_id=session.owner_id,
         team_id=team.id,
     )
+
+
+@router.get("/{league_id}/sessions", response_model=list[SessionResponse])
+async def list_sessions(
+    league_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """List all sessions belonging to this league, newest first."""
+    await _require_active_member(league_id, current_user.id, db)
+
+    result = await db.execute(
+        select(Session).where(Session.league_id == league_id).order_by(Session.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    return [
+        SessionResponse(
+            id=s.id,
+            name=s.name,
+            sport=s.sport,
+            season=s.season,
+            status=s.status,
+            script_speed=s.script_speed,
+            waiver_mode=s.waiver_mode,
+            max_teams=s.max_teams,
+            league_id=s.league_id,
+            owner_id=s.owner_id,
+        )
+        for s in sessions
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -244,6 +244,16 @@ export interface paths {
     };
   };
   "/leagues/{league_id}/sessions": {
+    get: {
+      parameters: { path: { league_id: string } };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["SessionResponse"][];
+          };
+        };
+      };
+    };
     post: {
       parameters: { path: { league_id: string } };
       requestBody: {
@@ -514,7 +524,7 @@ export interface components {
       max_teams: number;
       league_id: string | null;
       owner_id: string;
-      team_id: string;
+      team_id?: string | null;
       created_at: string;
     };
     JoinSessionResponse: {

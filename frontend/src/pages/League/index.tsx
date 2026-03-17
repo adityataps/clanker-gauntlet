@@ -15,11 +15,11 @@ import {
   EyeOff,
   Save,
   Trash2,
+  Settings,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/authStore";
 import type { components } from "@/api/schema";
@@ -55,35 +56,75 @@ type Member = components["schemas"]["MemberResponse"];
 type Session = components["schemas"]["SessionResponse"];
 type Invite = components["schemas"]["InviteResponse"];
 
-// ─── Session status badge ─────────────────────────────────────────────────────
+type ActiveView = "sessions" | "members" | "settings";
 
-const STATUS_COLORS: Record<string, string> = {
-  draft_pending: "border-border text-muted-foreground",
-  draft_in_progress: "border-sky-500/30 text-sky-400",
-  in_progress: "border-primary/30 text-primary",
-  paused: "border-amber-500/30 text-amber-400",
-  completed: "border-border text-muted-foreground",
+// ─── Session status helpers ────────────────────────────────────────────────────
+
+const STATUS_DOT: Record<string, string> = {
+  draft_pending: "bg-muted-foreground/40",
+  draft_in_progress: "bg-sky-400",
+  in_progress: "bg-primary",
+  paused: "bg-amber-400",
+  completed: "bg-muted-foreground/30",
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  draft_pending: "Setup",
+  draft_in_progress: "Draft",
+  in_progress: "Live",
+  paused: "Paused",
+  completed: "Done",
+};
+
+function StatusDot({ status }: { status: string }) {
+  const key = status.toLowerCase();
+  const isLive = key === "in_progress";
+  return (
+    <span className="relative flex h-2 w-2 shrink-0 items-center justify-center">
+      {isLive && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
+      )}
+      <span
+        className={cn(
+          "relative inline-flex h-1.5 w-1.5 rounded-full",
+          STATUS_DOT[key] ?? "bg-muted-foreground/40"
+        )}
+      />
+    </span>
+  );
+}
 
 function SessionStatusBadge({ status }: { status: string }) {
   const key = status.toLowerCase();
-  const label = key.replace(/_/g, " ");
+  const label = STATUS_LABEL[key] ?? key.replace(/_/g, " ");
+  const cls: Record<string, string> = {
+    draft_pending: "border-border text-muted-foreground",
+    draft_in_progress: "border-sky-500/30 text-sky-400",
+    in_progress: "border-primary/30 text-primary",
+    paused: "border-amber-500/30 text-amber-400",
+    completed: "border-border text-muted-foreground",
+  };
   return (
     <span
-      className={`rounded-sm border px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase tracking-wider ${STATUS_COLORS[key] ?? "border-border text-muted-foreground"}`}
+      className={cn(
+        "rounded-sm border px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase tracking-wider",
+        cls[key] ?? "border-border text-muted-foreground"
+      )}
     >
       {label}
     </span>
   );
 }
 
-// ─── Create session dialog ────────────────────────────────────────────────────
+// ─── Script helpers ────────────────────────────────────────────────────────────
 
 type ScriptOption = components["schemas"]["ScriptResponse"];
 
 function scriptLabel(s: ScriptOption) {
   return `${s.sport.toUpperCase()} ${s.season} — ${s.season_type} (${s.total_events} events)`;
 }
+
+// ─── Create session dialog ────────────────────────────────────────────────────
 
 function CreateSessionDialog({
   leagueId,
@@ -105,7 +146,6 @@ function CreateSessionDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load available scripts when dialog opens
   useEffect(() => {
     if (!open) return;
     setScriptsLoading(true);
@@ -256,72 +296,68 @@ function InviteDialog({
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  async function generateInvite() {
+  useEffect(() => {
+    if (!open) return;
     setLoading(true);
-    const { data } = await api.POST("/leagues/{league_id}/invites", {
-      params: { path: { league_id: league.id } },
-    });
-    setLoading(false);
-    if (data) setInvite(data);
-  }
+    api
+      .POST("/leagues/{league_id}/invites", {
+        params: { path: { league_id: league.id } },
+      })
+      .then(({ data }) => setInvite(data ?? null))
+      .finally(() => setLoading(false));
+  }, [open, league.id]);
 
-  const inviteUrl = invite ? `${window.location.origin}/join/${invite.token}` : null;
+  const inviteUrl = invite ? `${window.location.origin}/join/${invite.token}` : "";
 
   async function handleCopy() {
-    if (!inviteUrl) return;
     await navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v);
-        if (!v) setInvite(null);
-      }}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Invite to {league.name}</DialogTitle>
+          <DialogTitle>Invite member</DialogTitle>
           <DialogDescription>
-            Generate a one-time invite link to share with a new member.
+            Share this link to invite someone to <strong>{league.name}</strong>. Expires in 72
+            hours.
           </DialogDescription>
         </DialogHeader>
-
-        {!invite ? (
-          <div className="flex justify-center py-4">
-            <Button onClick={generateInvite} disabled={loading}>
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Generate invite link
-            </Button>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
-        ) : (
+        ) : invite ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Input value={inviteUrl ?? ""} readOnly className="font-mono text-xs" />
-              <Button size="icon" variant="outline" onClick={handleCopy}>
-                {copied ? (
-                  <Check className="h-4 w-4 text-green-400" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
+            <div className="flex gap-2">
+              <Input value={inviteUrl} readOnly className="text-xs" />
+              <Button size="sm" variant="outline" onClick={handleCopy} className="shrink-0">
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Expires {new Date(invite.expires_at).toLocaleString()}. Single use.
+              Expires{" "}
+              {new Date(invite.expires_at).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </p>
           </div>
+        ) : (
+          <p className="text-sm text-destructive">Failed to generate invite link.</p>
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-// ─── Members tab ──────────────────────────────────────────────────────────────
+// ─── Members panel ────────────────────────────────────────────────────────────
 
-function MembersTab({
+function MembersPanel({
   league,
   members,
   isManager,
@@ -335,86 +371,81 @@ function MembersTab({
   const { user } = useAuthStore();
   const [inviteOpen, setInviteOpen] = useState(false);
 
-  async function handleRemove(userId: string) {
-    await api.DELETE("/leagues/{league_id}/members/{user_id}", {
-      params: { path: { league_id: league.id, user_id: userId } },
-    });
-    onRefresh();
-  }
-
-  async function handlePromote(userId: string) {
+  async function handlePromote(memberId: string) {
     await api.PATCH("/leagues/{league_id}/members/{user_id}", {
-      params: { path: { league_id: league.id, user_id: userId } },
+      params: { path: { league_id: league.id, user_id: memberId } },
       body: { role: "manager" },
     });
     onRefresh();
   }
 
+  async function handleRemove(memberId: string) {
+    await api.DELETE("/leagues/{league_id}/members/{user_id}", {
+      params: { path: { league_id: league.id, user_id: memberId } },
+    });
+    onRefresh();
+  }
+
   return (
-    <>
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {members.length} {members.length === 1 ? "member" : "members"}
-        </p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-lg font-bold uppercase tracking-wide">Members</h2>
+          <p className="text-xs text-muted-foreground">
+            {members.length} {members.length === 1 ? "member" : "members"}
+          </p>
+        </div>
         {isManager && (
-          <Button size="sm" variant="outline" onClick={() => setInviteOpen(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-sm font-display text-xs uppercase tracking-wide"
+            onClick={() => setInviteOpen(true)}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
             Invite
           </Button>
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="divide-y divide-border rounded-sm border border-border">
         {members.map((m) => (
-          <div
-            key={m.user_id}
-            className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
-          >
+          <div key={m.user_id} className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold uppercase">
-                {m.display_name.slice(0, 2)}
+              <div className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent font-display text-xs font-bold uppercase text-muted-foreground">
+                {m.display_name?.[0] ?? "?"}
               </div>
               <div>
-                <p className="text-sm font-medium">
-                  {m.display_name}
-                  {m.user_id === user?.id && (
-                    <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>
-                  )}
-                </p>
+                <p className="text-sm font-medium">{m.display_name}</p>
                 <p className="text-xs text-muted-foreground">{m.email}</p>
               </div>
             </div>
-
             <div className="flex items-center gap-2">
-              <Badge
-                variant={m.role === "manager" ? "default" : "secondary"}
-                className="capitalize"
-              >
-                {m.role === "manager" && <Crown className="mr-1 h-3 w-3" />}
+              <span className="flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 font-display text-[9px] uppercase tracking-wider text-muted-foreground">
+                {m.role === "manager" && <Crown className="h-2.5 w-2.5" />}
                 {m.role}
-              </Badge>
-
+              </span>
               {isManager && m.user_id !== user?.id && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <MoreHorizontal className="h-4 w-4" />
+                      <MoreHorizontal className="h-3.5 w-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="end" className="w-40">
                     {m.role !== "manager" && (
                       <DropdownMenuItem onClick={() => handlePromote(m.user_id)}>
-                        <Crown className="mr-2 h-4 w-4" />
+                        <Crown className="mr-2 h-3.5 w-3.5" />
                         Make manager
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
                       onClick={() => handleRemove(m.user_id)}
+                      className="text-destructive focus:text-destructive"
                     >
-                      <UserMinus className="mr-2 h-4 w-4" />
-                      Remove from league
+                      <UserMinus className="mr-2 h-3.5 w-3.5" />
+                      Remove
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -425,89 +456,11 @@ function MembersTab({
       </div>
 
       <InviteDialog league={league} open={inviteOpen} onOpenChange={setInviteOpen} />
-    </>
+    </div>
   );
 }
 
-// ─── Sessions tab ─────────────────────────────────────────────────────────────
-
-function SessionsTab({
-  league,
-  sessions,
-  isManager,
-  canCreate,
-  onCreated,
-}: {
-  league: League;
-  sessions: Session[];
-  isManager: boolean;
-  canCreate: boolean;
-  onCreated: (s: Session) => void;
-}) {
-  const [createOpen, setCreateOpen] = useState(false);
-
-  const showCreate = isManager || (canCreate && league.session_creation === "any_member");
-
-  return (
-    <>
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
-        </p>
-        {showCreate && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            New session
-          </Button>
-        )}
-      </div>
-
-      {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16 text-center">
-          <Layers className="mb-3 h-8 w-8 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">No sessions yet.</p>
-          {showCreate && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              onClick={() => setCreateOpen(true)}
-            >
-              Create the first session
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {sessions.map((s) => (
-            <Link
-              key={s.id}
-              to={`/leagues/${league.id}/sessions/${s.id}`}
-              className="flex items-center justify-between rounded-lg border border-border px-4 py-3 transition-colors hover:border-primary/50 hover:bg-accent"
-            >
-              <div>
-                <p className="font-medium">{s.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">
-                  {s.script_speed} · {s.sport} · {s.max_teams} teams
-                </p>
-              </div>
-              <SessionStatusBadge status={s.status} />
-            </Link>
-          ))}
-        </div>
-      )}
-
-      <CreateSessionDialog
-        leagueId={league.id}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={onCreated}
-      />
-    </>
-  );
-}
-
-// ─── Settings tab ────────────────────────────────────────────────────────────
+// ─── Settings panel ───────────────────────────────────────────────────────────
 
 const PROVIDERS = [
   { key: "anthropic", label: "Anthropic (Claude)" },
@@ -608,13 +561,11 @@ function LeagueApiKeyRow({
   );
 }
 
-function SettingsTab({
+function SettingsPanel({
   league,
-  isManager,
   onLeagueUpdated,
 }: {
   league: League;
-  isManager: boolean;
   onLeagueUpdated: (updated: Partial<League>) => void;
 }) {
   const [hasKeys, setHasKeys] = useState<Record<string, boolean>>(league.has_league_keys ?? {});
@@ -642,21 +593,15 @@ function SettingsTab({
     if (data) setHasKeys(data.has_keys);
   }
 
-  if (!isManager) {
-    return (
-      <p className="text-sm text-muted-foreground">Only the league manager can view settings.</p>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Shared key toggle */}
-      <div className="flex items-start justify-between gap-4">
+      <h2 className="font-display text-lg font-bold uppercase tracking-wide">Settings</h2>
+
+      <div className="flex items-start justify-between gap-4 rounded-sm border border-border p-4">
         <div>
           <p className="text-sm font-medium">League shared API key</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            When enabled, members without their own LLM key will fall back to the league-level key
-            below. Members with their own key always use theirs first.
+            When enabled, members without their own LLM key fall back to the league-level key.
           </p>
         </div>
         <Switch
@@ -668,28 +613,104 @@ function SettingsTab({
       </div>
 
       {allowSharedKey && (
-        <>
-          <Separator />
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-medium">Provider keys</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Keys are encrypted at rest. Only set keys for providers your agent teams use. All
-                members' agent decisions share these rate limits.
-              </p>
-            </div>
-            {PROVIDERS.map(({ key, label }) => (
-              <LeagueApiKeyRow
-                key={key}
-                leagueId={league.id}
-                providerKey={key}
-                label={label}
-                hasKey={hasKeys[key] ?? false}
-                onSaved={reloadKeys}
-              />
-            ))}
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-medium">Provider keys</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Keys are encrypted at rest. All members' agent decisions share these rate limits.
+            </p>
           </div>
-        </>
+          <Separator />
+          {PROVIDERS.map(({ key, label }) => (
+            <LeagueApiKeyRow
+              key={key}
+              leagueId={league.id}
+              providerKey={key}
+              label={label}
+              hasKey={hasKeys[key] ?? false}
+              onSaved={reloadKeys}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sessions panel ───────────────────────────────────────────────────────────
+
+function SessionsPanel({
+  league,
+  sessions,
+  onNewSession,
+  canCreate,
+}: {
+  league: League;
+  sessions: Session[];
+  onNewSession: () => void;
+  canCreate: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-lg font-bold uppercase tracking-wide">Sessions</h2>
+          <p className="text-xs text-muted-foreground">
+            {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+          </p>
+        </div>
+        {canCreate && (
+          <Button
+            size="sm"
+            className="rounded-sm font-display text-xs font-bold uppercase tracking-[0.1em]"
+            onClick={onNewSession}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            New session
+          </Button>
+        )}
+      </div>
+
+      {sessions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-sm border border-dashed border-border py-20 text-center">
+          <Layers className="mb-3 h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No sessions yet.</p>
+          {canCreate && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4 rounded-sm font-display text-xs uppercase tracking-wide"
+              onClick={onNewSession}
+            >
+              Create the first session
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sessions.map((s) => (
+            <Link
+              key={s.id}
+              to={`/leagues/${league.id}/sessions/${s.id}`}
+              className="group flex items-center justify-between rounded-sm border border-border bg-card px-4 py-3 transition-all hover:border-primary/30 hover:bg-accent"
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <StatusDot status={s.status} />
+                  <p className="font-medium">{s.name}</p>
+                </div>
+                <p className="mt-0.5 pl-4 font-mono text-[10px] text-muted-foreground">
+                  {s.script_speed.toUpperCase()} · {s.sport.toUpperCase()} {s.season} ·{" "}
+                  {s.max_teams} teams
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <SessionStatusBadge status={s.status} />
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+              </div>
+            </Link>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -700,27 +721,30 @@ function SettingsTab({
 export function LeaguePage() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const navigate = useNavigate();
-  useAuthStore();
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<ActiveView>("sessions");
+  const [createOpen, setCreateOpen] = useState(false);
 
   async function load() {
     if (!leagueId) return;
-    const [leagueRes, membersRes] = await Promise.all([
+    const [leagueRes, membersRes, sessionsRes] = await Promise.all([
       api.GET("/leagues/{league_id}", { params: { path: { league_id: leagueId } } }),
       api.GET("/leagues/{league_id}/members", { params: { path: { league_id: leagueId } } }),
+      api.GET("/leagues/{league_id}/sessions", { params: { path: { league_id: leagueId } } }),
     ]);
     setLeague(leagueRes.data ?? null);
     setMembers(membersRes.data ?? []);
+    setSessions(sessionsRes.data ?? []);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
-  }, [leagueId]);
+  }, [leagueId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -743,132 +767,205 @@ export function LeaguePage() {
 
   const isManager = league.my_role === "manager";
   const isMember = !!league.my_role;
+  const canCreate = isManager || (isMember && league.session_creation === "any_member");
 
   return (
-    <div className="mx-auto max-w-screen-lg px-4 py-8">
-      {/* Header */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mb-6 -ml-1 text-muted-foreground"
-        onClick={() => navigate("/dashboard")}
-      >
-        <ArrowLeft className="mr-1.5 h-4 w-4" />
-        Dashboard
-      </Button>
+    <div className="flex" style={{ height: "calc(100vh - 48px)" }}>
+      {/* ── Sidebar ──────────────────────────────────────────────────────────── */}
+      <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-card">
+        {/* Back */}
+        <div className="border-b border-border px-4 py-3">
+          <button
+            className="flex items-center gap-1.5 font-display text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => navigate("/dashboard")}
+          >
+            <ArrowLeft className="h-3 w-3" />
+            Dashboard
+          </button>
+        </div>
 
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="font-display text-3xl font-bold uppercase tracking-wide">
-              {league.name}
-            </h1>
-            {league.my_role && (
-              <Badge variant="secondary" className="capitalize">
-                {league.my_role === "manager" && <Crown className="mr-1 h-3 w-3" />}
+        {/* League identity */}
+        <div className="border-b border-border px-4 py-4">
+          <h1 className="font-display text-base font-bold uppercase tracking-wide leading-tight text-foreground">
+            {league.name}
+          </h1>
+          {league.my_role && (
+            <div className="mt-1 flex items-center gap-1">
+              {isManager && <Crown className="h-2.5 w-2.5 text-primary" />}
+              <span className="font-display text-[10px] uppercase tracking-wider text-muted-foreground">
                 {league.my_role}
-              </Badge>
+              </span>
+            </div>
+          )}
+          {league.description && (
+            <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+              {league.description}
+            </p>
+          )}
+        </div>
+
+        {/* Sessions section */}
+        <div className="flex-1 px-2 py-3">
+          <div className="mb-1 flex items-center justify-between px-2">
+            <span className="font-display text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Sessions
+            </span>
+            {canCreate && (
+              <button
+                onClick={() => setCreateOpen(true)}
+                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="New session"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
             )}
           </div>
-          {league.description && (
-            <p className="mt-1 text-sm text-muted-foreground">{league.description}</p>
+
+          {sessions.length === 0 ? (
+            <div className="px-2 py-3">
+              <p className="text-[11px] text-muted-foreground/60">No sessions yet.</p>
+              {canCreate && (
+                <button
+                  onClick={() => setCreateOpen(true)}
+                  className="mt-1 font-display text-[10px] uppercase tracking-wider text-primary hover:underline"
+                >
+                  Create one →
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-0.5">
+              {sessions.map((s) => (
+                <Link
+                  key={s.id}
+                  to={`/leagues/${league.id}/sessions/${s.id}`}
+                  className="flex items-center gap-2 rounded-sm px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <StatusDot status={s.status} />
+                  <span className="flex-1 truncate font-medium">{s.name}</span>
+                  <span className="font-display text-[8px] uppercase tracking-wider opacity-60">
+                    {STATUS_LABEL[s.status.toLowerCase()] ?? s.status}
+                  </span>
+                </Link>
+              ))}
+            </div>
           )}
-          <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Users className="h-3.5 w-3.5" />
-              {league.member_count} {league.member_count === 1 ? "member" : "members"}
-            </span>
-            <span className="flex items-center gap-1">
-              <Layers className="h-3.5 w-3.5" />
-              {league.session_count} {league.session_count === 1 ? "session" : "sessions"}
-            </span>
-          </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="sessions">
-        <TabsList className="mb-6">
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          {isManager && <TabsTrigger value="settings">Settings</TabsTrigger>}
-        </TabsList>
-
-        <TabsContent value="sessions">
-          <Card>
-            <CardContent className="pt-6">
-              <SessionsTab
-                league={league}
-                sessions={sessions}
-                isManager={isManager}
-                canCreate={isMember}
-                onCreated={(s) => {
-                  setSessions((prev) => [s, ...prev]);
-                  setLeague((prev) =>
-                    prev ? { ...prev, session_count: prev.session_count + 1 } : prev
-                  );
-                }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="members">
-          <Card>
-            <CardContent className="pt-6">
-              <MembersTab
-                league={league}
-                members={members}
-                isManager={isManager}
-                onRefresh={() => {
-                  if (!leagueId) return;
-                  api
-                    .GET("/leagues/{league_id}/members", {
-                      params: { path: { league_id: leagueId } },
-                    })
-                    .then(({ data }) => setMembers(data ?? []));
-                }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {isManager && (
-          <TabsContent value="settings">
-            <Card>
-              <CardContent className="pt-6">
-                <SettingsTab
-                  league={league}
-                  isManager={isManager}
-                  onLeagueUpdated={(updated) =>
-                    setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
-                  }
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-      </Tabs>
-
-      {/* Leave league (non-managers) */}
-      {isMember && !isManager && (
-        <div className="mt-8 flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={async () => {
-              if (!leagueId) return;
-              await api.POST("/leagues/{league_id}/members/me/leave", {
-                params: { path: { league_id: leagueId } },
-              });
-              navigate("/dashboard");
-            }}
+        {/* Nav items */}
+        <div className="border-t border-border px-2 py-2">
+          <button
+            onClick={() => setActiveView("sessions")}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
+              activeView === "sessions"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
           >
-            Leave league
-          </Button>
+            <Layers className="h-3.5 w-3.5" />
+            Sessions
+            <span className="ml-auto font-mono text-[10px] tabular-nums opacity-60">
+              {sessions.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveView("members")}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
+              activeView === "members"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Users className="h-3.5 w-3.5" />
+            Members
+            <span className="ml-auto font-mono text-[10px] tabular-nums opacity-60">
+              {members.length}
+            </span>
+          </button>
+          {isManager && (
+            <button
+              onClick={() => setActiveView("settings")}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-sm px-2 py-2 font-display text-xs uppercase tracking-wider transition-colors",
+                activeView === "settings"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Settings
+            </button>
+          )}
         </div>
-      )}
+
+        {/* Leave league */}
+        {isMember && !isManager && (
+          <div className="border-t border-border px-2 py-2">
+            <button
+              className="w-full rounded-sm px-2 py-2 text-left font-display text-[10px] uppercase tracking-wider text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+              onClick={async () => {
+                if (!leagueId) return;
+                await api.POST("/leagues/{league_id}/members/me/leave", {
+                  params: { path: { league_id: leagueId } },
+                });
+                navigate("/dashboard");
+              }}
+            >
+              Leave league
+            </button>
+          </div>
+        )}
+      </aside>
+
+      {/* ── Main content ─────────────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto px-8 py-8">
+        {activeView === "sessions" && (
+          <SessionsPanel
+            league={league}
+            sessions={sessions}
+            onNewSession={() => setCreateOpen(true)}
+            canCreate={canCreate}
+          />
+        )}
+        {activeView === "members" && (
+          <MembersPanel
+            league={league}
+            members={members}
+            isManager={isManager}
+            onRefresh={() => {
+              if (!leagueId) return;
+              api
+                .GET("/leagues/{league_id}/members", {
+                  params: { path: { league_id: leagueId } },
+                })
+                .then(({ data }) => setMembers(data ?? []));
+            }}
+          />
+        )}
+        {activeView === "settings" && isManager && (
+          <SettingsPanel
+            league={league}
+            onLeagueUpdated={(updated) =>
+              setLeague((prev) => (prev ? { ...prev, ...updated } : prev))
+            }
+          />
+        )}
+      </main>
+
+      {/* ── Dialogs ──────────────────────────────────────────────────────────── */}
+      <CreateSessionDialog
+        leagueId={league.id}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(s) => {
+          setSessions((prev) => [s, ...prev]);
+          setLeague((prev) =>
+            prev ? { ...prev, session_count: (prev.session_count ?? 0) + 1 } : prev
+          );
+        }}
+      />
     </div>
   );
 }
