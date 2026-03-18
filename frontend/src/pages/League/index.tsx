@@ -13,6 +13,8 @@ import {
   Trash2,
   Play,
   Pause,
+  Crown,
+  Layers,
 } from "lucide-react";
 import { LeagueSidebar, StatusDot } from "@/components/LeagueSidebar";
 import { Button } from "@/components/ui/button";
