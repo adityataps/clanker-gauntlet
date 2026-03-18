@@ -150,6 +150,9 @@ class EventRunnerService:
             runner._priority_reset = session_row.priority_reset
             runner._compression_factor = session_row.compression_factor
             runner._wall_start_time = session_row.wall_start_time
+            runner._reaction_timeouts = (session_row.session_config or {}).get(
+                "reaction_timeouts", {}
+            )
 
             try:
                 await runner.run()

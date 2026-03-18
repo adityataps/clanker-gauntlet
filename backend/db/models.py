@@ -465,6 +465,7 @@ class Session(Base):
     wall_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_seq: Mapped[int] = mapped_column(Integer, default=0)
     scoring_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    session_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     league_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("leagues.id"), nullable=True
     )
@@ -698,7 +699,8 @@ class AgentDecision(Base):
         SAEnum(DecisionType, native_enum=False), nullable=False
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    reasoning_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reasoning_trace: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    triggered_by: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

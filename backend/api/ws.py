@@ -1,10 +1,9 @@
 """
 WebSocket endpoint — streams session events to connected clients.
 
-Each session has a Redis Stream key: session:{session_id}:events
-The EventRunner publishes STAT_UPDATE events there; all other event types are
-also broadcast so the UI can update standings, scores, and agent decisions in
-real time.
+Two Redis Stream keys per session:
+    session:{id}:broadcast      — all events; every connected client reads this
+    session:{id}:team:{team_id} — team-specific reaction window notifications
 
 Connection:
     WS /ws/sessions/{session_id}
@@ -16,13 +15,11 @@ Protocol (server → client):
     { "type": "<event_type>", "seq": <int>, "payload": {...} }
 
     Special message types:
-    { "type": "connected", "session_id": "..." }   — sent on successful auth
-    { "type": "error", "detail": "..." }            — sent before close on error
+    { "type": "connected", "session_id": "...", "team_id": "<uuid|null>" }
+    { "type": "error", "detail": "..." }
 
-The broadcaster reads the Redis Stream starting from the last-seen ID per
-connection (starts from "$" i.e. new events only, not history). For clients
-that need replay, the EventRunner's processed_events table is the source —
-WebSocket is for live delivery only.
+The broadcaster reads both streams starting from "$" (new events only).
+For replay, query the processed_events table via REST — WS is live-only.
 """
 
 from __future__ import annotations
@@ -30,22 +27,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
+from sqlalchemy import select
 
 from backend.auth.jwt import decode_access_token
 from backend.config import settings
+from backend.db.models import SessionMembership
 from backend.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
-# How often to poll the Redis stream when there are no new messages (seconds)
-_POLL_INTERVAL = 0.5
-# Max messages to read per poll
 _BLOCK_MS = 500
+_POLL_INTERVAL = 0.5
 
 
 @router.websocket("/ws/sessions/{session_id}")
@@ -54,6 +52,7 @@ async def session_ws(websocket: WebSocket, session_id: str):
     Stream live session events to a connected client.
 
     Auth: pass JWT as ?token=<jwt> query param.
+    Reads from broadcast stream and, if the user has a team, their team stream.
     """
     token = websocket.query_params.get("token")
     if not token:
@@ -69,11 +68,8 @@ async def session_ws(websocket: WebSocket, session_id: str):
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    # Verify the user is a member of this session
-    from sqlalchemy import select
-
-    from backend.db.models import SessionMembership
-
+    # Verify membership and resolve team_id (None for observers)
+    team_id: uuid.UUID | None = None
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(SessionMembership).where(
@@ -81,30 +77,54 @@ async def session_ws(websocket: WebSocket, session_id: str):
                 SessionMembership.user_id == user_id,
             )
         )
-        if result.scalar_one_or_none() is None:
+        membership = result.scalar_one_or_none()
+        if membership is None:
             await websocket.close(code=4003, reason="Not a member of this session")
             return
+        team_id = membership.team_id  # None for observers
 
     await websocket.accept()
-    await websocket.send_text(json.dumps({"type": "connected", "session_id": session_id}))
+    await websocket.send_text(
+        json.dumps(
+            {
+                "type": "connected",
+                "session_id": session_id,
+                "team_id": str(team_id) if team_id else None,
+            }
+        )
+    )
 
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    stream_key = f"session:{session_id}:events"
-    last_id = "$"  # only new events from this point forward
+
+    broadcast_key = f"session:{session_id}:broadcast"
+    team_key = f"session:{session_id}:team:{team_id}" if team_id else None
+
+    # Track last-seen IDs separately per stream
+    last_broadcast = "$"
+    last_team = "$"
 
     try:
         while True:
+            streams: dict[str, str] = {broadcast_key: last_broadcast}
+            if team_key:
+                streams[team_key] = last_team
+
             try:
-                results = await redis.xread({stream_key: last_id}, block=_BLOCK_MS, count=50)
+                results = await redis.xread(streams, block=_BLOCK_MS, count=50)
             except Exception as exc:
                 logger.warning("Redis read error for session %s: %s", session_id, exc)
                 await asyncio.sleep(_POLL_INTERVAL)
                 continue
 
             if results:
-                for _stream, messages in results:
+                for stream_name, messages in results:
                     for msg_id, fields in messages:
-                        last_id = msg_id
+                        # Advance the correct cursor
+                        if stream_name == broadcast_key:
+                            last_broadcast = msg_id
+                        else:
+                            last_team = msg_id
+
                         try:
                             await websocket.send_text(
                                 json.dumps(
@@ -112,6 +132,9 @@ async def session_ws(websocket: WebSocket, session_id: str):
                                         "type": fields.get("event_type", "unknown"),
                                         "seq": fields.get("seq"),
                                         "payload": json.loads(fields.get("payload", "{}")),
+                                        # informational=true means all teams see it but only
+                                        # the recipient is expected to act
+                                        "informational": fields.get("informational") == "true",
                                     }
                                 )
                             )

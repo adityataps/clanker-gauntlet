@@ -100,13 +100,20 @@ logger = logging.getLogger(__name__)
 # Batch size for fetching events from DB
 _FETCH_BATCH = 200
 
-# Safety timeout for COMPRESSED mode (agents should finish well before this)
-_COMPRESSED_TIMEOUT = 300.0  # 5 minutes
+# Default reaction window timeouts per event type (seconds).
+# Overridden per-session via session_config["reaction_timeouts"].
+_DEFAULT_REACTION_TIMEOUTS: dict[str, float] = {
+    "ROSTER_LOCK": 600.0,  # lineup lock — 10 min for humans to set lineups
+    "WAIVER_OPEN": 300.0,  # waiver window — 5 min to submit bids
+    "INJURY_UPDATE": 120.0,  # significant injury — 2 min to react
+    "WEEK_END": 30.0,  # brief pause after standings update
+}
 
 # Types written to processed_events (STAT_UPDATE goes to Redis only)
 _AUDITED_EVENT_TYPES = {
     "AGENT_WINDOW_OPEN",
     "AGENT_WINDOW_CLOSE",
+    "ROSTER_LOCK",
     "WEEK_END",
     "WAIVER_RESOLVED",
     "TRADE_RESOLVED",
@@ -168,7 +175,11 @@ class EventRunner:
         # Pending agent window state
         self._pending_window_type: str | None = None  # "lineup" | "waiver"
         self._pending_window_seq: int = 0
+        self._pending_window_timeout: float = _DEFAULT_REACTION_TIMEOUTS["ROSTER_LOCK"]
         self._pending_tasks: dict[uuid.UUID, asyncio.Task] = {}
+
+        # Reaction window timeouts — overridden by EventRunnerService from session_config
+        self._reaction_timeouts: dict[str, float] = {}
 
         # Shared context feed — mutable list all agent contexts point to.
         # Populated by lookahead (INSTANT) or appended to as events arrive
@@ -261,7 +272,7 @@ class EventRunner:
             case "AGENT_WINDOW_CLOSE":
                 await self._on_agent_window_close(event)
             case "ROSTER_LOCK":
-                pass  # lineup already locked by AGENT_WINDOW_CLOSE
+                pass  # lineup locked by AGENT_WINDOW_CLOSE; audited for UI
             case "GAME_START":
                 logger.info("Week %d games starting", event.week_number)
             case "SCORE_UPDATE":
@@ -286,7 +297,7 @@ class EventRunner:
         if event.event_type in _AUDITED_EVENT_TYPES:
             await self._audit_event(event)
 
-        await self._broadcast_event(event)
+        await self._route_event(event)
 
     # ------------------------------------------------------------------
     # Context events (NEWS_ITEM, INJURY_UPDATE)
@@ -322,8 +333,23 @@ class EventRunner:
         self._pending_window_type = window_type
         self._pending_window_seq = event.seq
 
+        # Resolve timeout from session config, falling back to module defaults
+        timeout_key = "ROSTER_LOCK" if window_type == "lineup" else "WAIVER_OPEN"
+        self._pending_window_timeout = self._reaction_timeouts.get(
+            timeout_key, _DEFAULT_REACTION_TIMEOUTS[timeout_key]
+        )
+
         # Build the shared context feed for this window
         self._window_feed = await self._build_window_feed(event.seq, week)
+
+        # Notify clients that a reaction window is open
+        await self._broadcast_reaction_window(
+            window_type=window_type,
+            week=week,
+            triggering_seq=event.seq,
+            timeout=self._pending_window_timeout,
+            open=True,
+        )
 
         if window_type == "lineup":
             await self._launch_lineup_tasks(week)
@@ -405,7 +431,16 @@ class EventRunner:
             return
 
         week = event.payload.get("week", event.week_number)
+        triggering_seq = self._pending_window_seq
         results = await self._collect_pending_tasks()
+
+        await self._broadcast_reaction_window(
+            window_type="lineup",
+            week=week,
+            triggering_seq=triggering_seq,
+            timeout=self._pending_window_timeout,
+            open=False,
+        )
 
         for team_id, result in results.items():
             if result is None:
@@ -419,6 +454,7 @@ class EventRunner:
                 decision_type=DecisionType.LINEUP,
                 payload=result.model_dump(),
                 reasoning_trace=result.reasoning,
+                triggered_by=[triggering_seq],
             )
 
         await self._upsert_matchup_rows(week)
@@ -492,7 +528,16 @@ class EventRunner:
             logger.warning("WAIVER_RESOLVED fired but no waiver window was open")
             return
 
+        triggering_seq = self._pending_window_seq
         results = await self._collect_pending_tasks()
+
+        await self._broadcast_reaction_window(
+            window_type="waiver",
+            week=week,
+            triggering_seq=triggering_seq,
+            timeout=self._pending_window_timeout,
+            open=False,
+        )
 
         bids_by_team: dict[str, list[WaiverBidModel]] = {
             str(team_id): bids for team_id, bids in results.items() if bids
@@ -526,7 +571,7 @@ class EventRunner:
                 week,
             )
 
-        await self._persist_waiver_results(results, claims, week)
+        await self._persist_waiver_results(results, claims, week, triggering_seq=triggering_seq)
         self._window_feed = None
 
     # ------------------------------------------------------------------
@@ -579,6 +624,7 @@ class EventRunner:
             decision_type=DecisionType.TRADE_RESPONSE,
             payload=decision.model_dump(),
             reasoning_trace=decision.reasoning,
+            triggered_by=[event.seq],
         )
 
     # ------------------------------------------------------------------
@@ -616,7 +662,7 @@ class EventRunner:
             return {}
 
         if self._script_speed == ScriptSpeed.MANAGED:
-            results = await self._await_all(timeout=_COMPRESSED_TIMEOUT)
+            results = await self._await_all(timeout=self._pending_window_timeout)
         else:
             results = await self._collect_ready()
 
@@ -750,9 +796,16 @@ class EventRunner:
         team_id: uuid.UUID,
         decision_type: DecisionType,
         payload: dict,
-        reasoning_trace: str | None,
+        reasoning_trace: str | dict | None,
+        triggered_by: list[int] | None = None,
         tokens_used: int = 0,
     ) -> None:
+        # Normalise reasoning_trace to JSONB — wrap plain strings for forward compatibility
+        if isinstance(reasoning_trace, str):
+            trace_json: dict | None = {"summary": reasoning_trace, "structured": None}
+        else:
+            trace_json = reasoning_trace  # already a dict or None
+
         self._decision_seq += 1
         row = AgentDecision(
             session_id=self._session_id,
@@ -760,7 +813,8 @@ class EventRunner:
             seq=self._decision_seq,
             decision_type=decision_type,
             payload=payload,
-            reasoning_trace=reasoning_trace,
+            reasoning_trace=trace_json,
+            triggered_by=triggered_by or [],
             tokens_used=tokens_used,
         )
         self._db.add(row)
@@ -898,6 +952,8 @@ class EventRunner:
         bids_by_team: dict[uuid.UUID, list[WaiverBidModel] | None],
         claims: list[WaiverClaim],
         week: int,
+        *,
+        triggering_seq: int = 0,
     ) -> None:
         winning_teams: dict[str, str] = {c.add_player_id: c.team_id for c in claims}
         claimed: set[str] = set(winning_teams.keys())
@@ -934,15 +990,16 @@ class EventRunner:
                     decision_type=DecisionType.WAIVER,
                     payload={"bids": [b.model_dump() for b in bids]},
                     reasoning_trace=None,
+                    triggered_by=[triggering_seq] if triggering_seq else [],
                 )
 
     async def _emit_stat_update(self, player_id: str, team_id: str, pts: float, week: int) -> None:
-        """Publish a STAT_UPDATE to the Redis stream. Not stored in DB."""
+        """Publish a STAT_UPDATE to the broadcast stream. Not stored in DB."""
         if self._redis is None:
             return
         try:
             await self._redis.xadd(
-                f"session:{self._session_id}:events",
+                f"session:{self._session_id}:broadcast",
                 {
                     "event_type": "STAT_UPDATE",
                     "seq": "0",
@@ -954,20 +1011,66 @@ class EventRunner:
         except Exception:
             logger.exception("Failed to emit STAT_UPDATE to Redis")
 
-    async def _broadcast_event(self, event: SeasonEvent) -> None:
-        """Publish any processed season event to the Redis stream for WebSocket delivery."""
+    async def _route_event(
+        self,
+        event: SeasonEvent,
+        *,
+        team_recipients: list[uuid.UUID] | None = None,
+    ) -> None:
+        """
+        Route a processed event to Redis streams for WebSocket delivery.
+
+        All events go to session:{id}:broadcast (the shared event log).
+        If team_recipients is set, the event is ALSO sent to each team's
+        session:{id}:team:{team_id} stream so the UI can show team-specific
+        action prompts.
+        """
         if self._redis is None:
             return
+        fields = {
+            "event_type": event.event_type,
+            "seq": str(event.seq),
+            "payload": json.dumps(event.payload or {}),
+        }
+        try:
+            await self._redis.xadd(f"session:{self._session_id}:broadcast", fields)
+            if team_recipients:
+                for tid in team_recipients:
+                    await self._redis.xadd(f"session:{self._session_id}:team:{tid}", fields)
+        except Exception:
+            logger.exception("Failed to route event %s (seq=%d)", event.event_type, event.seq)
+
+    async def _broadcast_reaction_window(
+        self,
+        *,
+        window_type: str,
+        week: int,
+        triggering_seq: int,
+        timeout: float,
+        open: bool,
+    ) -> None:
+        """
+        Publish a REACTION_WINDOW_OPEN or REACTION_WINDOW_CLOSE notification
+        to the broadcast stream so clients can show/hide deadline countdowns.
+        """
+        if self._redis is None:
+            return
+        event_type = "REACTION_WINDOW_OPEN" if open else "REACTION_WINDOW_CLOSE"
         try:
             await self._redis.xadd(
-                f"session:{self._session_id}:events",
+                f"session:{self._session_id}:broadcast",
                 {
-                    "event_type": event.event_type,
-                    "seq": str(event.seq),
-                    "payload": json.dumps(event.payload or {}),
+                    "event_type": event_type,
+                    "seq": "0",
+                    "payload": json.dumps(
+                        {
+                            "window_type": window_type,
+                            "week": week,
+                            "triggering_seq": triggering_seq,
+                            "timeout_seconds": timeout,
+                        }
+                    ),
                 },
             )
         except Exception:
-            logger.exception(
-                "Failed to broadcast event type=%s seq=%d", event.event_type, event.seq
-            )
+            logger.exception("Failed to broadcast %s", event_type)
