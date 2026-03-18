@@ -24,16 +24,40 @@ import {
   BarChart3,
   Swords,
   ListOrdered,
+  X,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSessionWs, type SessionEvent } from "@/hooks/useSessionWs";
 import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 import { LeagueSidebar } from "@/components/LeagueSidebar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useAuthStore } from "@/store/authStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SessionDetail = components["schemas"]["SessionDetailResponse"];
+type _BaseSessionDetail = components["schemas"]["SessionDetailResponse"];
+interface TeamSummary {
+  id: string;
+  name: string;
+  type: string;
+  faab_balance: number;
+  config: Record<string, string>;
+}
+interface SessionDetail extends Omit<_BaseSessionDetail, "teams"> {
+  max_teams: number;
+  owner_id: string;
+  teams: TeamSummary[];
+}
 type SessionSummary = components["schemas"]["SessionResponse"];
 type League = components["schemas"]["LeagueResponse"];
 
@@ -783,6 +807,245 @@ function RightPanel({
   );
 }
 
+// ─── Agent setup constants ────────────────────────────────────────────────────
+
+const ARCHETYPES = [
+  { key: "analytician", label: "The Analytician", desc: "Projection-driven" },
+  { key: "contrarian", label: "The Contrarian", desc: "Fades consensus" },
+  { key: "waiver_hawk", label: "The Waiver Hawk", desc: "Aggressive streaming" },
+  { key: "loyalist", label: "The Loyalist", desc: "Trusts veterans" },
+  { key: "newshound", label: "The Newshound", desc: "News/injury reactive" },
+  { key: "gambler", label: "The Gambler", desc: "Ceiling chasing" },
+  { key: "handcuff_king", label: "The Handcuff King", desc: "Injury insurance" },
+  { key: "trader", label: "The Trader", desc: "Buy low, sell high" },
+];
+
+const DEPTHS = [
+  { key: "shallow", label: "Shallow — fast & cheap" },
+  { key: "standard", label: "Standard — tool-use loop" },
+  { key: "deep", label: "Deep — multi-agent pipeline" },
+];
+
+// ─── SetupPanel ───────────────────────────────────────────────────────────────
+
+function SetupPanel({
+  sessionDetail,
+  isOwner,
+  onSessionUpdated,
+}: {
+  sessionDetail: SessionDetail;
+  isOwner: boolean;
+  onSessionUpdated: (data: SessionDetail) => void;
+}) {
+  const [agentName, setAgentName] = useState("");
+  const [archetype, setArchetype] = useState("analytician");
+  const [depth, setDepth] = useState("standard");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const isFull = sessionDetail.teams.length >= sessionDetail.max_teams;
+
+  async function refreshSession() {
+    const { data } = await api.GET("/sessions/{session_id}", {
+      params: { path: { session_id: sessionDetail.id } },
+    });
+    if (data) onSessionUpdated(data as SessionDetail);
+  }
+
+  async function handleAddAgent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!agentName.trim()) return;
+    setAdding(true);
+    setError(null);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await (api as any).POST(`/sessions/${sessionDetail.id}/agents`, {
+        body: {
+          name: agentName.trim(),
+          archetype,
+          reasoning_depth: depth,
+          provider: "anthropic",
+        },
+      });
+      if (res.error) {
+        setError((res.error as { detail?: string }).detail ?? "Failed to add agent");
+        return;
+      }
+      await refreshSession();
+      setAgentName("");
+      setShowAddForm(false);
+    } catch {
+      setError("Failed to add agent");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleRemove(teamId: string) {
+    setRemoving(teamId);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (api as any).DELETE(`/sessions/${sessionDetail.id}/teams/${teamId}`);
+      await refreshSession();
+    } catch {
+      // silently ignore
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="font-display text-xs uppercase tracking-wider text-muted-foreground">
+          Teams
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground/50">
+          {sessionDetail.teams.length} / {sessionDetail.max_teams}
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
+        {sessionDetail.teams.map((team) => (
+          <div
+            key={team.id}
+            className="flex items-center gap-3 rounded-sm border border-border/60 bg-card px-3 py-2.5"
+          >
+            <div
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-sm",
+                team.type === "agent"
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {team.type === "agent" ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">{team.name}</p>
+              {team.type === "agent" && team.config.archetype && (
+                <p className="text-[10px] text-muted-foreground/60">
+                  {ARCHETYPES.find((a) => a.key === team.config.archetype)?.label ??
+                    team.config.archetype}
+                  {" · "}
+                  {team.config.reasoning_depth ?? "standard"}
+                </p>
+              )}
+            </div>
+            {isOwner && team.type === "agent" && (
+              <button
+                onClick={() => handleRemove(team.id)}
+                disabled={removing === team.id}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed"
+                title="Remove agent"
+              >
+                {removing === team.id ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <X className="h-3 w-3" />
+                )}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {isOwner && (
+        <div className="mt-3">
+          {!showAddForm ? (
+            <button
+              onClick={() => setShowAddForm(true)}
+              disabled={isFull}
+              className="flex w-full items-center justify-center gap-1.5 rounded-sm border border-dashed border-border/60 py-2 text-xs text-muted-foreground/60 transition-colors hover:border-primary/40 hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus className="h-3 w-3" />
+              {isFull ? "Session full" : "Add agent"}
+            </button>
+          ) : (
+            <form
+              onSubmit={handleAddAgent}
+              className="space-y-2.5 rounded-sm border border-primary/20 bg-card p-3"
+            >
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Name
+                </label>
+                <Input
+                  value={agentName}
+                  onChange={(e) => setAgentName(e.target.value)}
+                  placeholder={
+                    (ARCHETYPES.find((a) => a.key === archetype)?.label ?? "Agent") + " Bot"
+                  }
+                  className="h-7 text-xs"
+                  autoFocus
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Archetype
+                  </label>
+                  <Select value={archetype} onValueChange={setArchetype}>
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ARCHETYPES.map((a) => (
+                        <SelectItem key={a.key} value={a.key} className="text-xs">
+                          <span>{a.label}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Depth
+                  </label>
+                  <Select value={depth} onValueChange={setDepth}>
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEPTHS.map((d) => (
+                        <SelectItem key={d.key} value={d.key} className="text-xs">
+                          {d.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {error && <p className="text-[10px] text-destructive">{error}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={adding} className="h-7 flex-1 text-xs">
+                  {adding ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+                  Add agent
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function SessionPage() {
@@ -791,6 +1054,7 @@ export function SessionPage() {
     sessionId: string;
   }>();
   const navigate = useNavigate();
+  const currentUser = useAuthStore((s) => s.user);
 
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -961,6 +1225,8 @@ export function SessionPage() {
     sessionDetail && !sessionDetail.is_running && sessionDetail.status !== "completed";
   const canPause = sessionDetail?.is_running;
   const status = sessionDetail ? statusLabel(sessionDetail.status, sessionDetail.is_running) : null;
+  const isOwner = !!currentUser && !!sessionDetail && currentUser.id === sessionDetail.owner_id;
+  const isDraft = sessionDetail?.status === "draft_pending";
 
   const progressPct =
     sessionDetail && sessionDetail.script.total_events > 0
@@ -1063,21 +1329,51 @@ export function SessionPage() {
           </div>
         )}
 
-        {/* Body — two-column */}
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_320px]">
-          <EventLog events={events} />
+        {/* Body — setup or live layout */}
+        {isDraft && sessionDetail ? (
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_320px]">
+            <div className="flex min-h-0 flex-col rounded-sm border border-border/50 bg-card/30 p-4">
+              <p className="mb-4 text-xs text-muted-foreground/60">
+                Add agent teams to fill empty slots, then start the session when ready. Human
+                members can join via invite link while the session is in draft.
+              </p>
+              <SetupPanel
+                sessionDetail={sessionDetail}
+                isOwner={isOwner}
+                onSessionUpdated={setSessionDetail}
+              />
+            </div>
+            <div className="flex min-h-0 flex-col gap-3">
+              <div className="rounded-sm border border-border/50 bg-card/30 p-3">
+                <p className="mb-1 font-display text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Script
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {sessionDetail.sport.toUpperCase()} {sessionDetail.season}
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">
+                  {sessionDetail.script.total_events.toLocaleString()} events ·{" "}
+                  {sessionDetail.script_speed}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_320px]">
+            <EventLog events={events} />
 
-          <RightPanel
-            leagueId={leagueId}
-            sessionId={sessionId}
-            scoresData={scoresData}
-            scoresLoading={scoresLoading}
-            standingsData={standingsData}
-            standingsLoading={standingsLoading}
-            decisionsData={decisionsData}
-            decisionsLoading={decisionsLoading}
-          />
-        </div>
+            <RightPanel
+              leagueId={leagueId}
+              sessionId={sessionId}
+              scoresData={scoresData}
+              scoresLoading={scoresLoading}
+              standingsData={standingsData}
+              standingsLoading={standingsLoading}
+              decisionsData={decisionsData}
+              decisionsLoading={decisionsLoading}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

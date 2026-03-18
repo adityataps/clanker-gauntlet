@@ -166,6 +166,7 @@ class TeamSummary(BaseModel):
     name: str
     type: str
     faab_balance: int
+    config: dict
 
 
 class ScriptSummary(BaseModel):
@@ -189,6 +190,8 @@ class SessionDetailResponse(BaseModel):
     is_running: bool
     script: ScriptSummary
     teams: list[TeamSummary]
+    max_teams: int
+    owner_id: uuid.UUID
     league_id: uuid.UUID | None
     created_at: datetime
 
@@ -244,9 +247,17 @@ async def _build_session_detail(
             total_events=script.total_events,
         ),
         teams=[
-            TeamSummary(id=t.id, name=t.name, type=t.type, faab_balance=t.faab_balance)
+            TeamSummary(
+                id=t.id,
+                name=t.name,
+                type=t.type,
+                faab_balance=t.faab_balance,
+                config=t.config or {},
+            )
             for t in teams
         ],
+        max_teams=session.max_teams,
+        owner_id=session.owner_id,
         league_id=session.league_id,
         created_at=session.created_at,
     )
@@ -364,6 +375,114 @@ async def pause_session(
     await db.refresh(session)
 
     return await _build_session_detail(session, db, runner_service)
+
+
+# ---------------------------------------------------------------------------
+# POST /{session_id}/agents  — add an agent team (owner only, DRAFT_PENDING)
+# ---------------------------------------------------------------------------
+
+
+class AddAgentRequest(BaseModel):
+    name: str
+    archetype: str = "analytician"
+    reasoning_depth: str = "standard"
+    provider: str = "anthropic"
+
+
+@router.post("/{session_id}/agents", response_model=TeamSummary, status_code=201)
+async def add_agent_team(
+    session_id: uuid.UUID,
+    body: AddAgentRequest,
+    current_user: Annotated[object, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an agent team to a session. Owner only. Session must be in DRAFT_PENDING."""
+    from backend.agents.archetypes import get_archetype
+
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the session owner can add agents")
+
+    if session.status != SessionStatus.DRAFT_PENDING:
+        raise HTTPException(status_code=409, detail="Can only add agents while session is in draft")
+
+    try:
+        get_archetype(body.archetype)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    count_result = await db.execute(
+        select(func.count()).select_from(Team).where(Team.session_id == session_id)
+    )
+    if count_result.scalar_one() >= session.max_teams:
+        raise HTTPException(status_code=409, detail="Session is full")
+
+    config = {
+        "archetype": body.archetype,
+        "reasoning_depth": body.reasoning_depth,
+        "provider": body.provider,
+    }
+    team = Team(
+        session_id=session_id,
+        name=body.name,
+        type=TeamType.AGENT,
+        config=config,
+        faab_balance=100,
+    )
+    db.add(team)
+    await db.commit()
+    await db.refresh(team)
+
+    return TeamSummary(
+        id=team.id,
+        name=team.name,
+        type=str(team.type.value) if hasattr(team.type, "value") else str(team.type),
+        faab_balance=team.faab_balance,
+        config=team.config or {},
+    )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /{session_id}/teams/{team_id}  — remove a team (owner, DRAFT_PENDING)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/{session_id}/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_team(
+    session_id: uuid.UUID,
+    team_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a team from a session. Owner only. Session must be in DRAFT_PENDING."""
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the session owner can remove teams")
+
+    if session.status != SessionStatus.DRAFT_PENDING:
+        raise HTTPException(
+            status_code=409, detail="Can only remove teams while session is in draft"
+        )
+
+    team = await db.get(Team, team_id)
+    if team is None or team.session_id != session_id:
+        raise HTTPException(status_code=404, detail="Team not found in this session")
+
+    # Don't allow removing a team that belongs to a session member
+    linked_sm = await db.scalar(
+        select(SessionMembership).where(SessionMembership.team_id == team_id)
+    )
+    if linked_sm is not None:
+        raise HTTPException(status_code=409, detail="Cannot remove a team belonging to a member")
+
+    await db.delete(team)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
