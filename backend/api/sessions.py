@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,14 +12,18 @@ from backend.auth.dependencies import get_current_user
 from backend.core.runner_service import EventRunnerService
 from backend.core.team_factory import load_teams_for_session
 from backend.db.models import (
+    AgentDecision,
     LeagueMembership,
     LeagueMembershipStatus,
+    Matchup,
     MembershipRole,
+    PlayerScore,
     SeasonEvent,
     SeasonScript,
     Session,
     SessionMembership,
     SessionStatus,
+    Standings,
     Team,
     TeamType,
 )
@@ -409,3 +413,285 @@ async def delete_session(
 
     await db.delete(session)
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# GET /{session_id}/scores
+# ---------------------------------------------------------------------------
+
+
+class PlayerScoreItem(BaseModel):
+    player_id: str
+    points_total: float
+    stats_json: dict
+
+
+class MatchupScoreResponse(BaseModel):
+    matchup_id: uuid.UUID
+    period_number: int
+    home_team_id: uuid.UUID
+    home_team_name: str
+    home_score: float
+    away_team_id: uuid.UUID
+    away_team_name: str
+    away_score: float
+    winner_team_id: uuid.UUID | None
+    home_players: list[PlayerScoreItem]
+    away_players: list[PlayerScoreItem]
+
+
+class WeekScoresResponse(BaseModel):
+    week: int
+    matchups: list[MatchupScoreResponse]
+
+
+@router.get("/{session_id}/scores", response_model=WeekScoresResponse)
+async def get_session_scores(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    week: int | None = Query(default=None, ge=1),
+):
+    """
+    Return matchup scores for a given week (defaults to current week).
+    Includes per-player breakdowns for both sides of each matchup.
+    """
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    sm = await db.scalar(
+        select(SessionMembership).where(
+            SessionMembership.session_id == session_id,
+            SessionMembership.user_id == current_user.id,
+        )
+    )
+    if sm is None:
+        raise HTTPException(status_code=403, detail="Not a member of this session")
+
+    # Resolve week: use query param, fall back to current cursor week
+    if week is None:
+        if session.current_seq > 0:
+            week_row = await db.scalar(
+                select(SeasonEvent.week_number)
+                .where(
+                    SeasonEvent.script_id == session.script_id,
+                    SeasonEvent.seq < session.current_seq,
+                )
+                .order_by(SeasonEvent.seq.desc())
+                .limit(1)
+            )
+            week = week_row if week_row is not None else 1
+        else:
+            week = 1
+
+    # Fetch matchups for the week
+    matchups_result = await db.execute(
+        select(Matchup).where(
+            Matchup.session_id == session_id,
+            Matchup.period_number == week,
+        )
+    )
+    matchups = matchups_result.scalars().all()
+
+    if not matchups:
+        return WeekScoresResponse(week=week, matchups=[])
+
+    # Build team name lookup
+    all_team_ids = {m.home_team_id for m in matchups} | {m.away_team_id for m in matchups}
+    teams_result = await db.execute(select(Team).where(Team.id.in_(all_team_ids)))
+    team_map: dict[uuid.UUID, Team] = {t.id: t for t in teams_result.scalars().all()}
+
+    # Fetch player scores for the week
+    player_scores_result = await db.execute(
+        select(PlayerScore).where(
+            PlayerScore.session_id == session_id,
+            PlayerScore.period_number == week,
+            PlayerScore.team_id.in_(all_team_ids),
+        )
+    )
+    # Group by team_id
+    player_scores_by_team: dict[uuid.UUID, list[PlayerScore]] = {}
+    for ps in player_scores_result.scalars().all():
+        player_scores_by_team.setdefault(ps.team_id, []).append(ps)
+
+    matchup_responses = []
+    for m in matchups:
+        home_team = team_map.get(m.home_team_id)
+        away_team = team_map.get(m.away_team_id)
+        matchup_responses.append(
+            MatchupScoreResponse(
+                matchup_id=m.id,
+                period_number=m.period_number,
+                home_team_id=m.home_team_id,
+                home_team_name=home_team.name if home_team else "Unknown",
+                home_score=m.home_score,
+                away_team_id=m.away_team_id,
+                away_team_name=away_team.name if away_team else "Unknown",
+                away_score=m.away_score,
+                winner_team_id=m.winner_team_id,
+                home_players=[
+                    PlayerScoreItem(
+                        player_id=ps.player_id,
+                        points_total=ps.points_total,
+                        stats_json=ps.stats_json,
+                    )
+                    for ps in player_scores_by_team.get(m.home_team_id, [])
+                ],
+                away_players=[
+                    PlayerScoreItem(
+                        player_id=ps.player_id,
+                        points_total=ps.points_total,
+                        stats_json=ps.stats_json,
+                    )
+                    for ps in player_scores_by_team.get(m.away_team_id, [])
+                ],
+            )
+        )
+
+    return WeekScoresResponse(week=week, matchups=matchup_responses)
+
+
+# ---------------------------------------------------------------------------
+# GET /{session_id}/standings
+# ---------------------------------------------------------------------------
+
+
+class StandingsEntry(BaseModel):
+    rank: int
+    team_id: uuid.UUID
+    team_name: str
+    team_type: str
+    wins: int
+    losses: int
+    ties: int
+    points_for: float
+    points_against: float
+
+
+class StandingsResponse(BaseModel):
+    standings: list[StandingsEntry]
+
+
+@router.get("/{session_id}/standings", response_model=StandingsResponse)
+async def get_session_standings(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Return current season standings, ranked by wins then points_for."""
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    sm = await db.scalar(
+        select(SessionMembership).where(
+            SessionMembership.session_id == session_id,
+            SessionMembership.user_id == current_user.id,
+        )
+    )
+    if sm is None:
+        raise HTTPException(status_code=403, detail="Not a member of this session")
+
+    rows_result = await db.execute(
+        select(Standings, Team)
+        .join(Team, Team.id == Standings.team_id)
+        .where(Standings.session_id == session_id)
+        .order_by(Standings.wins.desc(), Standings.points_for.desc())
+    )
+    rows = rows_result.all()
+
+    entries = [
+        StandingsEntry(
+            rank=idx + 1,
+            team_id=standings.team_id,
+            team_name=team.name,
+            team_type=team.type,
+            wins=standings.wins,
+            losses=standings.losses,
+            ties=standings.ties,
+            points_for=standings.points_for,
+            points_against=standings.points_against,
+        )
+        for idx, (standings, team) in enumerate(rows)
+    ]
+
+    return StandingsResponse(standings=entries)
+
+
+# ---------------------------------------------------------------------------
+# GET /{session_id}/decisions
+# ---------------------------------------------------------------------------
+
+
+class DecisionEntry(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    team_name: str
+    seq: int
+    decision_type: str
+    payload: dict
+    reasoning_trace: dict | None
+    triggered_by: list
+    tokens_used: int
+    created_at: datetime
+
+
+class DecisionsResponse(BaseModel):
+    decisions: list[DecisionEntry]
+
+
+@router.get("/{session_id}/decisions", response_model=DecisionsResponse)
+async def get_session_decisions(
+    session_id: uuid.UUID,
+    current_user: Annotated[object, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    team_id: uuid.UUID | None = Query(default=None),
+):
+    """
+    Return recent agent decisions, newest first.
+    Optionally filter to a specific team with ?team_id=<uuid>.
+    """
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    sm = await db.scalar(
+        select(SessionMembership).where(
+            SessionMembership.session_id == session_id,
+            SessionMembership.user_id == current_user.id,
+        )
+    )
+    if sm is None:
+        raise HTTPException(status_code=403, detail="Not a member of this session")
+
+    stmt = (
+        select(AgentDecision, Team)
+        .join(Team, Team.id == AgentDecision.team_id)
+        .where(AgentDecision.session_id == session_id)
+    )
+    if team_id is not None:
+        stmt = stmt.where(AgentDecision.team_id == team_id)
+    stmt = stmt.order_by(AgentDecision.created_at.desc()).limit(limit)
+
+    rows_result = await db.execute(stmt)
+    rows = rows_result.all()
+
+    entries = [
+        DecisionEntry(
+            id=decision.id,
+            team_id=decision.team_id,
+            team_name=team.name,
+            seq=decision.seq,
+            decision_type=decision.decision_type,
+            payload=decision.payload,
+            reasoning_trace=decision.reasoning_trace,
+            triggered_by=decision.triggered_by,
+            tokens_used=decision.tokens_used,
+            created_at=decision.created_at,
+        )
+        for decision, team in rows
+    ]
+
+    return DecisionsResponse(decisions=entries)
