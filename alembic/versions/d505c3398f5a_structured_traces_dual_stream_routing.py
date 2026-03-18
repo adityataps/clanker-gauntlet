@@ -43,7 +43,7 @@ def upgrade() -> None:
             "triggered_by",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'[]'::jsonb",
+            server_default=sa.text("'[]'::jsonb"),
         ),
     )
 
@@ -55,7 +55,7 @@ def upgrade() -> None:
             "session_config",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'{}'::jsonb",
+            server_default=sa.text("'{}'::jsonb"),
         ),
     )
 
