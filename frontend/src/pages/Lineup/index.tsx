@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Lock, Save, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Lock, Save, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { api } from "@/api/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,133 +83,91 @@ const POSITION_LABEL: Record<string, string> = {
   DEF: "DEF",
 };
 
-// ── Mock data — replace with API call when backend endpoint is ready ────────
+// ── API response types ──────────────────────────────────────────────────────
 
-const MOCK: LineupState = {
-  week: 14,
-  deadline: new Date(Date.now() + 2 * 60 * 60 * 1_000).toISOString(),
+interface LineupApiPlayer {
+  player_id: string;
+  name: string;
+  position: string;
+  nfl_team: string | null;
+  projected_points: number | null;
+  status: string;
+  is_starter: boolean;
+}
+
+interface LineupApiResponse {
+  week: number;
+  deadline: string | null;
+  locked: boolean;
+  roster: LineupApiPlayer[];
+}
+
+// ── Slot assignment: map flat roster → LineupState ──────────────────────────
+
+function buildLineupState(data: LineupApiResponse): LineupState {
+  const starters = data.roster.filter((p) => p.is_starter);
+  const bench: RosterPlayer[] = data.roster
+    .filter((p) => !p.is_starter)
+    .map((p) => ({ ...p, nfl_team: p.nfl_team ?? "?", opponent: null }));
+
+  const toRosterPlayer = (p: LineupApiPlayer): RosterPlayer => ({
+    ...p,
+    nfl_team: p.nfl_team ?? "?",
+    status: p.status as RosterPlayer["status"],
+    opponent: null,
+  });
+
+  const slots: LineupState["slots"] = {
+    QB: null,
+    RB1: null,
+    RB2: null,
+    WR1: null,
+    WR2: null,
+    TE: null,
+    FLEX: null,
+    K: null,
+    DEF: null,
+  };
+  const overflow: RosterPlayer[] = [];
+
+  for (const p of starters) {
+    if (p.position === "QB" && !slots.QB) slots.QB = toRosterPlayer(p);
+    else if (p.position === "RB" && !slots.RB1) slots.RB1 = toRosterPlayer(p);
+    else if (p.position === "RB" && !slots.RB2) slots.RB2 = toRosterPlayer(p);
+    else if (p.position === "WR" && !slots.WR1) slots.WR1 = toRosterPlayer(p);
+    else if (p.position === "WR" && !slots.WR2) slots.WR2 = toRosterPlayer(p);
+    else if (p.position === "TE" && !slots.TE) slots.TE = toRosterPlayer(p);
+    else if (p.position === "K" && !slots.K) slots.K = toRosterPlayer(p);
+    else if (p.position === "DEF" && !slots.DEF) slots.DEF = toRosterPlayer(p);
+    else if (["RB", "WR", "TE"].includes(p.position) && !slots.FLEX) slots.FLEX = toRosterPlayer(p);
+    else overflow.push(toRosterPlayer(p));
+  }
+
+  return {
+    week: data.week,
+    deadline: data.deadline,
+    locked: data.locked,
+    slots,
+    bench: [...bench, ...overflow],
+  };
+}
+
+const EMPTY_LINEUP: LineupState = {
+  week: 1,
+  deadline: null,
   locked: false,
   slots: {
-    QB: {
-      player_id: "p1",
-      name: "Jalen Hurts",
-      position: "QB",
-      nfl_team: "PHI",
-      projected_points: 28.4,
-      status: "ACTIVE",
-      opponent: "vs DAL",
-    },
-    RB1: {
-      player_id: "p2",
-      name: "Saquon Barkley",
-      position: "RB",
-      nfl_team: "PHI",
-      projected_points: 22.1,
-      status: "ACTIVE",
-      opponent: "vs DAL",
-    },
-    RB2: {
-      player_id: "p3",
-      name: "Derrick Henry",
-      position: "RB",
-      nfl_team: "BAL",
-      projected_points: 18.6,
-      status: "QUESTIONABLE",
-      opponent: "@ PIT",
-    },
-    WR1: {
-      player_id: "p4",
-      name: "Justin Jefferson",
-      position: "WR",
-      nfl_team: "MIN",
-      projected_points: 19.3,
-      status: "ACTIVE",
-      opponent: "vs CHI",
-    },
-    WR2: {
-      player_id: "p5",
-      name: "Amon-Ra St. Brown",
-      position: "WR",
-      nfl_team: "DET",
-      projected_points: 16.8,
-      status: "ACTIVE",
-      opponent: "@ GB",
-    },
-    TE: {
-      player_id: "p6",
-      name: "Sam LaPorta",
-      position: "TE",
-      nfl_team: "DET",
-      projected_points: 11.2,
-      status: "ACTIVE",
-      opponent: "@ GB",
-    },
-    FLEX: {
-      player_id: "p7",
-      name: "Malik Nabers",
-      position: "WR",
-      nfl_team: "NYG",
-      projected_points: 14.5,
-      status: "DOUBTFUL",
-      opponent: "vs WAS",
-    },
-    K: {
-      player_id: "p8",
-      name: "Jake Elliott",
-      position: "K",
-      nfl_team: "PHI",
-      projected_points: 8.9,
-      status: "ACTIVE",
-      opponent: "vs DAL",
-    },
-    DEF: {
-      player_id: "p9",
-      name: "Philadelphia Eagles",
-      position: "DEF",
-      nfl_team: "PHI",
-      projected_points: 9.2,
-      status: "ACTIVE",
-      opponent: "vs DAL",
-    },
+    QB: null,
+    RB1: null,
+    RB2: null,
+    WR1: null,
+    WR2: null,
+    TE: null,
+    FLEX: null,
+    K: null,
+    DEF: null,
   },
-  bench: [
-    {
-      player_id: "p10",
-      name: "Jaylen Warren",
-      position: "RB",
-      nfl_team: "PIT",
-      projected_points: 12.3,
-      status: "ACTIVE",
-      opponent: "vs BAL",
-    },
-    {
-      player_id: "p11",
-      name: "Tee Higgins",
-      position: "WR",
-      nfl_team: "CIN",
-      projected_points: 13.7,
-      status: "OUT",
-      opponent: "@ CLE",
-    },
-    {
-      player_id: "p12",
-      name: "Tyler Higbee",
-      position: "TE",
-      nfl_team: "LAR",
-      projected_points: 7.4,
-      status: "ACTIVE",
-      opponent: "@ SF",
-    },
-    {
-      player_id: "p13",
-      name: "Gus Edwards",
-      position: "RB",
-      nfl_team: "LAC",
-      projected_points: 9.8,
-      status: "ACTIVE",
-      opponent: "vs LV",
-    },
-  ],
+  bench: [],
 };
 
 // ── useCountdown ───────────────────────────────────────────────────────────
@@ -417,10 +376,24 @@ export function LineupPage() {
   const { leagueId, sessionId } = useParams<{ leagueId: string; sessionId: string }>();
   const navigate = useNavigate();
 
-  // TODO: replace MOCK with api.GET("/sessions/{session_id}/lineup", ...)
-  const [lineup, setLineup] = useState<LineupState>(MOCK);
+  const [lineup, setLineup] = useState<LineupState>(EMPTY_LINEUP);
+  const [loading, setLoading] = useState(true);
   const [selection, setSelection] = useState<Selection>(null);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+
+  // ── Load lineup from API ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!sessionId) return;
+    setLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (api as any)
+      .GET(`/sessions/${sessionId}/lineup`)
+      .then(({ data }: { data: LineupApiResponse | undefined }) => {
+        if (data) setLineup(buildLineupState(data));
+      })
+      .finally(() => setLoading(false));
+  }, [sessionId]);
 
   const countdown = useCountdown(lineup.deadline, lineup.locked);
   const isLocked = lineup.locked || countdown === "Locked";
@@ -551,12 +524,21 @@ export function LineupPage() {
   // ── Save ─────────────────────────────────────────────────────────────────
 
   const saveLineup = useCallback(async () => {
-    if (saveState !== "unsaved") return;
+    if (saveState !== "unsaved" || !sessionId) return;
     setSaveState("saving");
-    // TODO: replace with api.PUT("/sessions/{session_id}/lineup", ...)
-    await new Promise((r) => setTimeout(r, 600));
-    setSaveState("saved");
-  }, [saveState, sessionId]);
+    try {
+      const starters = Object.values(lineup.slots)
+        .filter(Boolean)
+        .map((p) => p!.player_id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (api as any).PUT(`/sessions/${sessionId}/lineup`, {
+        body: { starters, week: lineup.week },
+      });
+      setSaveState("saved");
+    } catch {
+      setSaveState("unsaved");
+    }
+  }, [saveState, sessionId, lineup.slots, lineup.week]);
 
   useEffect(() => {
     if (saveState !== "unsaved") return;
@@ -565,6 +547,14 @@ export function LineupPage() {
   }, [saveState, saveLineup]);
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center py-24">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-7">
