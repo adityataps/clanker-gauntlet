@@ -62,7 +62,7 @@ type ActiveView = "sessions" | "members" | "settings";
 const STATUS_LABEL: Record<string, string> = {
   draft_pending: "Setup",
   draft_in_progress: "Draft",
-  in_progress: "Live",
+  in_progress: "Playing",
   paused: "Paused",
   completed: "Done",
 };

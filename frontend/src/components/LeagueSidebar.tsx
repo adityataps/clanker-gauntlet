@@ -32,7 +32,7 @@ const STATUS_DOT_CLS: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   draft_pending: "Setup",
   draft_in_progress: "Draft",
-  in_progress: "Live",
+  in_progress: "Playing",
   paused: "Paused",
   completed: "Done",
 };
@@ -60,7 +60,7 @@ const SESSION_GROUPS = [
   },
   {
     key: "running",
-    label: "In Progress",
+    label: "Playing",
     filter: (s: Session) => s.status === "in_progress" && s.script_speed !== "immersive",
   },
   { key: "paused", label: "Paused", filter: (s: Session) => s.status === "paused" },

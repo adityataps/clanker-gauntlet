@@ -180,7 +180,7 @@ const EVENT_ICON: Record<string, React.ReactNode> = {
 };
 
 function statusLabel(status: string, isRunning: boolean): { label: string; cls: string } {
-  if (isRunning) return { label: "Live", cls: "text-primary" };
+  if (isRunning) return { label: "Playing", cls: "text-primary" };
   switch (status) {
     case "in_progress":
     case "draft_in_progress":
@@ -212,7 +212,7 @@ function LiveBadge({ isConnected }: { isConnected: boolean }) {
       ) : (
         <WifiOff className="h-2.5 w-2.5" />
       )}
-      {isConnected ? "Live" : "Disconnected"}
+      {isConnected ? "Connected" : "Disconnected"}
     </div>
   );
 }
